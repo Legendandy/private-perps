@@ -1,0 +1,21 @@
+[package]
+name = "stealth-perps"
+version = "0.1.0"
+description = "Private perpetual futures powered by Arcium MPC"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib", "lib"]
+name = "stealth_perps"
+
+[features]
+no-entrypoint = []
+no-idl = []
+no-log-ix-name = []
+cpi = ["no-entrypoint"]
+default = []
+idl-build = ["anchor-lang/idl-build", "arcium-anchor/idl-build"]
+
+[dependencies]
+anchor-lang = { version = "0.30.1", features = ["init-if-needed"] }
+arcium-anchor = { version = "0.2", features = ["full"] }

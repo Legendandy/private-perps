@@ -1,0 +1,30 @@
+{
+  "name": "stealth-perps",
+  "version": "0.1.0",
+  "description": "Private perpetual futures on Solana powered by Arcium MPC",
+  "license": "MIT",
+  "scripts": {
+    "build": "arcium build",
+    "test": "arcium test",
+    "test:devnet": "arcium test --cluster devnet",
+    "deploy": "arcium deploy --cluster devnet",
+    "dev": "cd app && yarn dev"
+  },
+  "dependencies": {
+    "@arcium-hq/client": "^0.2.0",
+    "@coral-xyz/anchor": "^0.30.1",
+    "@solana/web3.js": "^1.95.0",
+    "@stablelib/x25519": "^1.0.3",
+    "bn.js": "^5.2.1"
+  },
+  "devDependencies": {
+    "@types/bn.js": "^5.1.6",
+    "@types/chai": "^4.3.12",
+    "@types/mocha": "^10.0.6",
+    "@types/node": "^20.11.5",
+    "chai": "^4.4.1",
+    "mocha": "^10.3.0",
+    "ts-mocha": "^10.0.0",
+    "typescript": "^5.3.3"
+  }
+}

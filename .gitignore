@@ -1,0 +1,9 @@
+node_modules/
+target/
+.anchor/
+dist/
+.env
+.env.local
+app/node_modules/
+app/dist/
+*.tsbuildinfo

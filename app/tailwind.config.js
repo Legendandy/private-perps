@@ -1,0 +1,96 @@
+/** @type {import('tailwindcss').Config} */
+export default {
+  content: ["./index.html", "./src/**/*.{js,ts,jsx,tsx}"],
+  darkMode: "class",
+  theme: {
+    extend: {
+      colors: {
+        // Arcium Sentinel Design System
+        background: "#050505",
+        surface: "#131313",
+        "surface-dim": "#131313",
+        "surface-bright": "#3a3939",
+        "surface-container-lowest": "#0e0e0e",
+        "surface-container-low": "#1c1b1b",
+        "surface-container": "#201f1f",
+        "surface-container-high": "#2a2a2a",
+        "surface-container-highest": "#353534",
+        "on-surface": "#e5e2e1",
+        "on-surface-variant": "#cbc3d7",
+        "inverse-surface": "#e5e2e1",
+        "inverse-on-surface": "#313030",
+        outline: "#958ea0",
+        "outline-variant": "#494454",
+        "surface-tint": "#d0bcff",
+        primary: "#d0bcff",
+        "on-primary": "#3c0091",
+        "primary-container": "#8B5CF6",
+        "on-primary-container": "#340080",
+        "inverse-primary": "#6d3bd7",
+        secondary: "#89ceff",
+        "on-secondary": "#00344d",
+        "secondary-container": "#00a2e6",
+        "on-secondary-container": "#00344e",
+        // Neon Green = confidential/encrypted status
+        tertiary: "#10B981",
+        "tertiary-dim": "#4edea3",
+        "on-tertiary": "#003824",
+        "tertiary-container": "#00a572",
+        error: "#ffb4ab",
+        "on-error": "#690005",
+        "error-container": "#93000a",
+        // Brand shortcuts
+        purple: "#8B5CF6",
+        "neon-blue": "#0EA5E9",
+        "neon-green": "#10B981",
+      },
+      fontFamily: {
+        sans: ["Inter", "sans-serif"],
+        mono: ["Space Grotesk", "monospace"],
+      },
+      fontSize: {
+        h1: ["48px", { lineHeight: "1.1", letterSpacing: "-0.02em", fontWeight: "700" }],
+        h2: ["32px", { lineHeight: "1.2", letterSpacing: "-0.01em", fontWeight: "600" }],
+        h3: ["24px", { lineHeight: "1.3", fontWeight: "600" }],
+        "body-lg": ["18px", { lineHeight: "1.6", fontWeight: "400" }],
+        "body-md": ["16px", { lineHeight: "1.6", fontWeight: "400" }],
+        "mono-data": ["14px", { lineHeight: "1.4", letterSpacing: "0.02em", fontWeight: "500" }],
+        "label-caps": ["12px", { lineHeight: "1", letterSpacing: "0.1em", fontWeight: "700" }],
+      },
+      borderRadius: {
+        sm: "0.125rem",
+        DEFAULT: "0.25rem",
+        md: "0.375rem",
+        lg: "0.5rem",
+        xl: "0.75rem",
+        full: "9999px",
+      },
+      spacing: {
+        xs: "4px",
+        sm: "8px",
+        md: "16px",
+        lg: "24px",
+        xl: "40px",
+      },
+      backdropBlur: {
+        glass: "24px",
+      },
+      animation: {
+        "pulse-slow": "pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite",
+        "glow-green": "glow-green 2s ease-in-out infinite alternate",
+        "slide-up": "slide-up 0.3s ease-out",
+      },
+      keyframes: {
+        "glow-green": {
+          "0%": { boxShadow: "inset 0 0 12px rgba(16, 185, 129, 0.05)" },
+          "100%": { boxShadow: "inset 0 0 20px rgba(16, 185, 129, 0.12)" },
+        },
+        "slide-up": {
+          "0%": { transform: "translateY(8px)", opacity: "0" },
+          "100%": { transform: "translateY(0)", opacity: "1" },
+        },
+      },
+    },
+  },
+  plugins: [],
+};
