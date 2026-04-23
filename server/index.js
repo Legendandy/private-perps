@@ -18,7 +18,7 @@ const cors = require("cors");
 const { Connection, PublicKey } = require("@solana/web3.js");
 const anchor = require("@coral-xyz/anchor");
 const {
-  getMXEPublicKeyWithRetry,
+  getMXEPublicKey,
   getMXEAccAddress,
   awaitComputationFinalization,
   getArciumEnv,
@@ -77,7 +77,7 @@ app.get("/api/arcium/mxe-public-key", async (req, res) => {
       { commitment: "confirmed" }
     );
 
-    const mxePubKey = await getMXEPublicKeyWithRetry(provider, programId);
+    const mxePubKey = await getMXEPublicKey(provider, programId);
 
     res.json({
       publicKey: Buffer.from(mxePubKey).toString("base64"),
