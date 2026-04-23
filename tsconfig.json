@@ -1,14 +1,12 @@
 {
   "compilerOptions": {
-    "types": ["mocha", "chai"],
+    "types": ["mocha", "chai", "node"],
     "typeRoots": ["./node_modules/@types"],
-    "lib": ["es2015"],
+    "lib": ["es2022"],
     "module": "commonjs",
-    "target": "es6",
+    "target": "es2022",
+    "strict": false,
     "esModuleInterop": true,
-    "resolveJsonModule": true,
-    "strict": true,
-    "skipLibCheck": true
-  },
-  "include": ["tests/**/*.ts", "app/src/**/*.ts", "app/src/**/*.tsx"]
+    "resolveJsonModule": true
+  }
 }

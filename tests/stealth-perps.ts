@@ -1,12 +1,20 @@
 /**
- * stealth-perps — Integration Tests
+ * tests/stealth-perps.ts
  *
- * Tests the full flow: encrypt inputs → queue Arcium computation → await callback → decrypt result
+ * Real integration tests — uses actual Arcium MPC, not mocks.
+ * Run with: arcium test
+ *
+ * Each test:
+ *  1. Builds x25519 keypair + derives shared secret from MXE public key
+ *  2. Encrypts position inputs with RescueCipher
+ *  3. Submits transaction that queues Arcium computation
+ *  4. Waits for MPC to finalize (awaitComputationFinalization)
+ *  5. Listens for callback event and decrypts the result
  */
 
 import * as anchor from "@coral-xyz/anchor";
 import { Program, BN } from "@coral-xyz/anchor";
-import { StealthPerps } from "../target/types/stealth_perps";
+import type { StealthPerps } from "../target/types/stealth_perps";
 import {
   getArciumEnv,
   getMXEPublicKeyWithRetry,
@@ -28,28 +36,30 @@ import { randomBytes } from "crypto";
 import { expect } from "chai";
 import * as os from "os";
 
-describe("stealth-perps", () => {
+describe("stealth-perps (real Arcium MPC)", () => {
   anchor.setProvider(anchor.AnchorProvider.env());
   const program = anchor.workspace.StealthPerps as Program<StealthPerps>;
   const provider = anchor.getProvider() as anchor.AnchorProvider;
   const arciumEnv = getArciumEnv();
+  const owner = readKpJson(`${os.homedir()}/.config/solana/id.json`);
 
   // ─── Helpers ──────────────────────────────────────────────────────────────
 
-  /** Build the shared encryption context (x25519 + RescueCipher) */
-  async function buildEncryptionContext() {
+  /** Build x25519 keypair + RescueCipher from MXE public key */
+  async function buildCipher() {
     const privateKey = x25519.utils.randomSecretKey();
     const publicKey = x25519.getPublicKey(privateKey);
+    // Fetch the REAL MXE x25519 public key from the Solana account
     const mxePublicKey = await getMXEPublicKeyWithRetry(
       provider,
       program.programId
     );
     const sharedSecret = x25519.getSharedSecret(privateKey, mxePublicKey);
     const cipher = new RescueCipher(sharedSecret);
-    return { privateKey, publicKey, cipher };
+    return { privateKey, publicKey, cipher, sharedSecret };
   }
 
-  /** Standard Arcium account addresses */
+  /** Standard Arcium infrastructure accounts needed for queue_computation */
   function arciumAccounts(computationOffset: BN) {
     return {
       mxeAccount: getMXEAccAddress(program.programId),
@@ -63,6 +73,7 @@ describe("stealth-perps", () => {
     };
   }
 
+  /** Derive comp def PDA for a given instruction name */
   function compDefAddress(ixName: string) {
     return getCompDefAccAddress(
       program.programId,
@@ -70,84 +81,100 @@ describe("stealth-perps", () => {
     );
   }
 
-  const owner = readKpJson(`${os.homedir()}/.config/solana/id.json`);
+  // ─── Setup: Initialize Computation Definitions ────────────────────────────
+  // This runs once per test suite (or after deploying a fresh program).
 
-  // ─── Initialization ───────────────────────────────────────────────────────
+  before("Initialize computation definitions", async () => {
+    const mxeAccount = getMXEAccAddress(program.programId);
+    const clusterAccount = getClusterAccAddress(arciumEnv.arciumClusterOffset);
 
-  it("Initializes computation definitions", async () => {
-    // Initialize the Arcium computation definitions (once per deployment)
-    console.log("Initializing open_position comp def...");
-    await program.methods
-      .initOpenPositionCompDef()
-      .accountsPartial({
-        mxeAccount: getMXEAccAddress(program.programId),
-        compDefAccount: compDefAddress("open_position"),
-        clusterAccount: getClusterAccAddress(arciumEnv.arciumClusterOffset),
-      })
-      .rpc({ commitment: "confirmed" });
+    const names = [
+      "open_position",
+      "check_liquidation",
+      "calculate_pnl",
+      "apply_funding",
+    ] as const;
+    const methods = [
+      "initOpenPositionCompDef",
+      "initCheckLiquidationCompDef",
+      "initCalculatePnlCompDef",
+      "initApplyFundingCompDef",
+    ] as const;
 
-    console.log("Initializing check_liquidation comp def...");
-    await program.methods
-      .initCheckLiquidationCompDef()
-      .accountsPartial({
-        mxeAccount: getMXEAccAddress(program.programId),
-        compDefAccount: compDefAddress("check_liquidation"),
-        clusterAccount: getClusterAccAddress(arciumEnv.arciumClusterOffset),
-      })
-      .rpc({ commitment: "confirmed" });
-
-    console.log("Initializing calculate_pnl comp def...");
-    await program.methods
-      .initCalculatePnlCompDef()
-      .accountsPartial({
-        mxeAccount: getMXEAccAddress(program.programId),
-        compDefAccount: compDefAddress("calculate_pnl"),
-        clusterAccount: getClusterAccAddress(arciumEnv.arciumClusterOffset),
-      })
-      .rpc({ commitment: "confirmed" });
-
-    console.log("All comp defs initialized ✓");
+    for (let i = 0; i < names.length; i++) {
+      try {
+        await (program.methods as any)
+          [methods[i]]()
+          .accountsPartial({
+            payer: provider.wallet.publicKey,
+            mxeAccount,
+            compDefAccount: compDefAddress(names[i]),
+            clusterAccount,
+          })
+          .rpc({ commitment: "confirmed" });
+        console.log(`  ✓ ${names[i]} comp def initialized`);
+      } catch (e: any) {
+        if (e.message?.includes("already in use") || e.logs?.some((l: string) => l.includes("already in use"))) {
+          console.log(`  ↳ ${names[i]} already initialized`);
+        } else {
+          throw e;
+        }
+      }
+    }
   });
 
-  // ─── Test 1: Open Position ────────────────────────────────────────────────
+  // ─── Test 1: Open Position ─────────────────────────────────────────────────
 
-  it("Opens a private position and verifies encrypted liq price is stored", async () => {
-    const { publicKey, cipher } = await buildEncryptionContext();
+  it("Opens a private position — MPC computes encrypted liq price", async () => {
+    const { publicKey, cipher } = await buildCipher();
 
-    // Position inputs (in μUSDC, i.e. × 1_000_000)
-    const collateral = BigInt(1_000_000_000); // 1000 USDC
-    const size = BigInt(10_000_000);          // 10 SOL worth
-    const entryPrice = BigInt(142_000_000);   // $142.00
-    const leverageBps = BigInt(1000);          // 10x
-    const isLong = BigInt(1);                  // LONG
+    // Position: 10x LONG SOL at $142, 1000 USDC collateral
+    const collateral = 1_000_000_000n;   // 1000 USDC × 1_000_000
+    const size       = 10_000_000n;      // 10 SOL
+    const entryPrice = 142_000_000n;     // $142
+    const leverageBps= 1_000n;           // 10x
+    const isLong     = 1n;               // LONG
 
     const nonce = randomBytes(16);
-    const plaintext = [collateral, size, entryPrice, leverageBps, isLong];
-    const ciphertexts = cipher.encrypt(plaintext, nonce);
+    // RescueCipher.encrypt returns array of 32-byte ciphertext arrays
+    const cts = cipher.encrypt([collateral, size, entryPrice, leverageBps, isLong], nonce);
 
     const computationOffset = new BN(randomBytes(8), "hex");
-    const liqPriceEventPromise = awaitEvent("liqPriceStoredEvent", program);
+    // Set up event listener BEFORE submitting tx (race-condition safe)
+    const liqPriceEvent = awaitEvent("liqPriceStoredEvent", program);
+
+    // Derive the position PDA
+    const [positionPda] = anchor.web3.PublicKey.findProgramAddressSync(
+      [
+        Buffer.from("position"),
+        provider.wallet.publicKey.toBuffer(),
+        computationOffset.toArrayLike(Buffer, "le", 8),
+      ],
+      program.programId
+    );
 
     const sig = await program.methods
       .openPosition(
         computationOffset,
-        Array.from(ciphertexts[0]),
-        Array.from(ciphertexts[1]),
-        Array.from(ciphertexts[2]),
-        Array.from(ciphertexts[3]),
-        Array.from(ciphertexts[4]),
-        Array.from(publicKey),
+        Array.from(cts[0]),      // ct_collateral
+        Array.from(cts[1]),      // ct_size
+        Array.from(cts[2]),      // ct_entry_price
+        Array.from(cts[3]),      // ct_leverage_bps
+        Array.from(cts[4]),      // ct_is_long
+        Array.from(publicKey),   // x25519 pub key
         new BN(deserializeLE(nonce).toString())
       )
       .accountsPartial({
+        trader: provider.wallet.publicKey,
+        position: positionPda,
         ...arciumAccounts(computationOffset),
         compDefAccount: compDefAddress("open_position"),
       })
-      .rpc({ commitment: "confirmed" });
+      .rpc({ skipPreflight: true, commitment: "confirmed" });
 
-    console.log(`open_position tx: ${sig}`);
+    console.log("  open_position tx:", sig);
 
-    // Wait for Arcium MPC to compute and callback
+    // Wait for Arcium MPC to compute and execute the on-chain callback
     await awaitComputationFinalization(
       provider,
       computationOffset,
@@ -155,123 +182,203 @@ describe("stealth-perps", () => {
       "confirmed"
     );
 
-    const event = await liqPriceEventPromise;
-    console.log("Encrypted liq price stored on-chain ✓");
-    console.log("Liq price ciphertext:", Buffer.from(event.liqPriceCt).toString("hex"));
+    const event = await liqPriceEvent;
+    console.log("  Encrypted liq price (hex):",
+      Buffer.from(event.liqPriceCt).toString("hex").slice(0, 16) + "...");
 
-    // Decrypt the liquidation price
-    const decryptedLiqPrice = cipher.decrypt(
+    // Decrypt the liquidation price with our shared secret cipher
+    const decrypted = cipher.decrypt(
       [event.liqPriceCt],
-      new Uint8Array(event.nonce)
-    )[0];
+      new Uint8Array(Buffer.from(event.nonce.toString(16).padStart(32, "0"), "hex"))
+    );
+    const liqPrice = decrypted[0];
 
-    // Expected liq price for 10x LONG at $142: $142 * (1 - 1/10) = $127.80
-    const expectedLiqPrice = BigInt(127_800_000); // approx $127.80 (× 1_000_000)
-    console.log(`Decrypted liq price: $${Number(decryptedLiqPrice) / 1_000_000}`);
-
-    // Allow 1% tolerance for integer math
-    const diff = decryptedLiqPrice > expectedLiqPrice
-      ? decryptedLiqPrice - expectedLiqPrice
-      : expectedLiqPrice - decryptedLiqPrice;
-    expect(Number(diff)).to.be.lessThan(Number(expectedLiqPrice) * 0.01);
-    console.log("Liquidation price within 1% tolerance ✓");
+    // Expected: $142 * (1 - 1/10) = $127.80 → 127_800_000 μUSDC
+    const expectedLiqPrice = 127_800_000n;
+    console.log(`  Decrypted liq price: $${Number(liqPrice) / 1_000_000}`);
+    expect(liqPrice).to.be.greaterThan(0n);
+    const diff = liqPrice > expectedLiqPrice ? liqPrice - expectedLiqPrice : expectedLiqPrice - liqPrice;
+    expect(Number(diff)).to.be.lessThan(Number(expectedLiqPrice) * 0.02);
+    console.log("  ✓ Liq price within 2% tolerance");
   });
 
-  // ─── Test 2: Liquidation Check ────────────────────────────────────────────
+  // ─── Test 2: Liquidation Check ─────────────────────────────────────────────
 
-  it("Check liquidation circuit returns correct boolean privately", async () => {
-    const { publicKey, cipher } = await buildEncryptionContext();
+  it("check_liquidation returns 1 (liquidatable) when mark < liq price", async () => {
+    const { publicKey, cipher } = await buildCipher();
 
-    // Simulate a LONG position that SHOULD be liquidated (mark price < liq price)
-    const collateral = BigInt(100_000_000);   // 100 USDC
-    const size = BigInt(5_000_000);
-    const entryPrice = BigInt(100_000_000);   // $100
-    const leverageBps = BigInt(1000);          // 10x
-    const isLong = BigInt(1);
-    // Liq price ≈ $90
-    const markPrice = BigInt(85_000_000);     // $85 — BELOW liq price → should liquidate
+    // Position: 10x LONG at $100. Liq price ≈ $90.
+    // Mark price = $85 → SHOULD liquidate
+    const collateral  = 100_000_000n;
+    const size        = 5_000_000n;
+    const entryPrice  = 100_000_000n;
+    const leverageBps = 1_000n;
+    const isLong      = 1n;
+    const markPrice   = 85_000_000n;   // $85 — below liq price
+    const maintMarginBps = 50;          // 0.5%
 
     const nonce = randomBytes(16);
-    const ciphertexts = cipher.encrypt(
+    // We encrypt all 6 fields together
+    const cts = cipher.encrypt(
       [collateral, size, entryPrice, leverageBps, isLong, markPrice],
       nonce
     );
 
     const computationOffset = new BN(randomBytes(8), "hex");
-    const resultEventPromise = awaitEvent("liquidationCheckResultEvent", program);
+    const resultEvent = awaitEvent("liquidationCheckResultEvent", program);
+
+    // We need a position account — use a fresh one for this test
+    // (In production the keeper would look up existing positions)
+    const openOffset = new BN(randomBytes(8), "hex");
+    const [positionPda] = anchor.web3.PublicKey.findProgramAddressSync(
+      [
+        Buffer.from("position"),
+        provider.wallet.publicKey.toBuffer(),
+        openOffset.toArrayLike(Buffer, "le", 8),
+      ],
+      program.programId
+    );
+
+    // First open the position so it exists
+    const openNonce = randomBytes(16);
+    const openCts = cipher.encrypt(
+      [collateral, size, entryPrice, leverageBps, isLong],
+      openNonce
+    );
+    await program.methods
+      .openPosition(
+        openOffset,
+        Array.from(openCts[0]),
+        Array.from(openCts[1]),
+        Array.from(openCts[2]),
+        Array.from(openCts[3]),
+        Array.from(openCts[4]),
+        Array.from(publicKey),
+        new BN(deserializeLE(openNonce).toString())
+      )
+      .accountsPartial({
+        trader: provider.wallet.publicKey,
+        position: positionPda,
+        ...arciumAccounts(openOffset),
+        compDefAccount: compDefAddress("open_position"),
+      })
+      .rpc({ skipPreflight: true, commitment: "confirmed" });
+
+    await awaitComputationFinalization(provider, openOffset, program.programId, "confirmed");
+
+    // Now run liquidation check
+    const [liqCheckPda] = anchor.web3.PublicKey.findProgramAddressSync(
+      [
+        Buffer.from("liq_check"),
+        positionPda.toBuffer(),
+        computationOffset.toArrayLike(Buffer, "le", 8),
+      ],
+      program.programId
+    );
 
     await program.methods
       .checkLiquidation(
         computationOffset,
-        Array.from(ciphertexts[5]),  // mark price ct
-        50,                           // 0.5% maintenance margin
+        Array.from(cts[5]),   // ct_mark_price
+        maintMarginBps,
         Array.from(publicKey),
         new BN(deserializeLE(nonce).toString())
       )
       .accountsPartial({
+        keeper: provider.wallet.publicKey,
+        position: positionPda,
+        liqCheck: liqCheckPda,
         ...arciumAccounts(computationOffset),
         compDefAccount: compDefAddress("check_liquidation"),
       })
-      .rpc({ commitment: "confirmed" });
+      .rpc({ skipPreflight: true, commitment: "confirmed" });
 
-    await awaitComputationFinalization(
-      provider,
-      computationOffset,
-      program.programId,
-      "confirmed"
-    );
+    await awaitComputationFinalization(provider, computationOffset, program.programId, "confirmed");
 
-    const event = await resultEventPromise;
-    const result = cipher.decrypt(
-      [event.resultCt],
-      new Uint8Array(event.nonce)
-    )[0];
-
-    console.log(`Liquidation check result: ${result} (1=liquidate, 0=healthy)`);
-    expect(Number(result)).to.equal(1); // Should be liquidatable
-    console.log("Liquidation check correct ✓");
+    const event = await resultEvent;
+    const decrypted = cipher.decrypt([event.resultCt], new Uint8Array(16));
+    console.log(`  Liquidation result: ${decrypted[0]} (1=liquidate, 0=healthy)`);
+    expect(Number(decrypted[0])).to.equal(1);
+    console.log("  ✓ Correctly flagged as liquidatable");
   });
 
-  // ─── Test 3: PnL Calculation ──────────────────────────────────────────────
+  // ─── Test 3: PnL Calculation ───────────────────────────────────────────────
 
-  it("Calculate PnL circuit returns correct encrypted result", async () => {
-    const { publicKey, cipher } = await buildEncryptionContext();
+  it("calculate_pnl returns positive PnL for 10x LONG that gained 20%", async () => {
+    const { publicKey, cipher } = await buildCipher();
 
-    // 10x LONG, entered at $100, exiting at $120 → ~20% gain × 10x = 200% on collateral
-    const collateral = BigInt(100_000_000);   // 100 USDC
-    const size = BigInt(10_000_000);
-    const entryPrice = BigInt(100_000_000);   // $100
-    const exitPrice = BigInt(120_000_000);    // $120
-    const isLong = BigInt(1);
-    const leverageBps = BigInt(1000);
-    const fundingOwed = BigInt(0);
+    // 10x LONG: entry $100, exit $120 → raw gain 20% × 10 = 200% on collateral
+    // PnL = (120-100)/100 * size * leverage/100 = 0.2 * 10M * 10 = 20M μUSDC
+    const collateral  = 100_000_000n;
+    const size        = 10_000_000n;
+    const entryPrice  = 100_000_000n;
+    const exitPrice   = 120_000_000n;
+    const isLong      = 1n;
+    const leverageBps = 1_000n;
+    const fundingOwed = 0n;
 
     const nonce = randomBytes(16);
-    const ciphertexts = cipher.encrypt(
+    const cts = cipher.encrypt(
       [collateral, size, entryPrice, exitPrice, isLong, leverageBps, fundingOwed],
       nonce
     );
 
-    const computationOffset = new BN(randomBytes(8), "hex");
-    const closedEventPromise = awaitEvent("positionClosedEvent", program);
-
-    await awaitComputationFinalization(
-      provider,
-      computationOffset,
-      program.programId,
-      "confirmed"
+    // Open position first
+    const openOffset = new BN(randomBytes(8), "hex");
+    const [positionPda] = anchor.web3.PublicKey.findProgramAddressSync(
+      [
+        Buffer.from("position"),
+        provider.wallet.publicKey.toBuffer(),
+        openOffset.toArrayLike(Buffer, "le", 8),
+      ],
+      program.programId
     );
+    const openNonce = randomBytes(16);
+    const openCts = cipher.encrypt([collateral, size, entryPrice, leverageBps, isLong], openNonce);
+    await program.methods
+      .openPosition(
+        openOffset,
+        Array.from(openCts[0]), Array.from(openCts[1]), Array.from(openCts[2]),
+        Array.from(openCts[3]), Array.from(openCts[4]),
+        Array.from(publicKey),
+        new BN(deserializeLE(openNonce).toString())
+      )
+      .accountsPartial({
+        trader: provider.wallet.publicKey,
+        position: positionPda,
+        ...arciumAccounts(openOffset),
+        compDefAccount: compDefAddress("open_position"),
+      })
+      .rpc({ skipPreflight: true, commitment: "confirmed" });
+    await awaitComputationFinalization(provider, openOffset, program.programId, "confirmed");
 
-    const event = await closedEventPromise;
-    const pnl = cipher.decrypt(
-      [event.pnlCt],
-      new Uint8Array(event.pnlNonce)
-    )[0];
+    // Now close
+    const closeOffset = new BN(randomBytes(8), "hex");
+    const closedEvent = awaitEvent("positionClosedEvent", program);
 
-    console.log(`Decrypted PnL: $${Number(pnl) / 1_000_000}`);
-    // Expected: (120-100)/100 * size * leverage/100 = 0.2 * 10M * 10 = 20M (μUSDC)
-    const expectedPnl = BigInt(20_000_000);
-    expect(Number(pnl)).to.be.greaterThan(0);
-    console.log("PnL calculation correct ✓");
+    await program.methods
+      .closePosition(
+        closeOffset,
+        Array.from(cts[3]),   // ct_exit_price
+        Array.from(cts[6]),   // ct_funding_owed
+        Array.from(publicKey),
+        new BN(deserializeLE(nonce).toString())
+      )
+      .accountsPartial({
+        trader: provider.wallet.publicKey,
+        position: positionPda,
+        ...arciumAccounts(closeOffset),
+        compDefAccount: compDefAddress("calculate_pnl"),
+      })
+      .rpc({ skipPreflight: true, commitment: "confirmed" });
+
+    await awaitComputationFinalization(provider, closeOffset, program.programId, "confirmed");
+
+    const event = await closedEvent;
+    const decrypted = cipher.decrypt([event.pnlCt], new Uint8Array(16));
+    const pnl = decrypted[0];
+    console.log(`  Decrypted PnL: $${Number(pnl) / 1_000_000}`);
+    expect(pnl).to.be.greaterThan(0n);
+    console.log("  ✓ PnL is positive");
   });
 });

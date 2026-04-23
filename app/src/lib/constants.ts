@@ -1,74 +1,118 @@
-export const PROGRAM_ID = "StLtHpErPs1111111111111111111111111111111111";
+/**
+ * constants.ts — Stealth Perps configuration
+ * Update PROGRAM_ID + BACKEND_API_BASE after deploying to devnet.
+ */
 
-export const ARCIUM_CLUSTER_OFFSET = 456; // devnet offset from Arcium.toml
+export const PROGRAM_ID =
+  import.meta.env.VITE_PROGRAM_ID || "57dAxRF57a33kHwa51Xhd4eNjLg7vc7Q1phfMKS4xtfy";
 
-export const MARKETS = [
+export const RPC_URL =
+  import.meta.env.VITE_RPC_URL || "https://api.devnet.solana.com";
+
+export const BACKEND_API_BASE =
+  import.meta.env.VITE_BACKEND_API_BASE || "http://localhost:4000";
+
+export const ARCIUM_CLUSTER_OFFSET = 456;
+
+/** Scale factor: 6 decimal places (μUSDC) */
+export const SCALE = 1_000_000n;
+
+export const LEVERAGE_OPTIONS = [1, 2, 5, 10, 20, 50];
+export const MAX_LEVERAGE = 50;
+export const MAINTENANCE_MARGIN_BPS = 50; // 0.5%
+
+/**
+ * Markets with CoinGecko IDs (for REST fallback) + Binance WS symbol
+ * Prices are seeded here — they get overridden by live data immediately.
+ */
+export interface MarketConfig {
+  symbol: string;       // display: "BTC/USDC"
+  label: string;        // "BITCOIN"
+  icon: string;         // material-symbols name
+  binanceWs: string;    // Binance ws stream: "btcusdt@ticker"
+  coingeckoId: string;  // for REST fallback
+  seedPrice: number;
+  seedChange: number;
+}
+
+export const MARKETS: MarketConfig[] = [
   {
-    symbol: "SOL/USDC",
-    label: "SOLANA",
-    icon: "token",
-    price: 142.18,
-    change: 5.11,
-    high24h: 148.5,
-    low24h: 138.2,
-    volume24h: "284M",
-    openInterest: "91M",
-    fundingRate: 0.0082,
+    symbol: "BTC/USDC",
+    label: "BITCOIN",
+    icon: "currency_bitcoin",
+    binanceWs: "btcusdt@ticker",
+    coingeckoId: "bitcoin",
+    seedPrice: 64000,
+    seedChange: 0,
   },
   {
     symbol: "ETH/USDC",
     label: "ETHEREUM",
     icon: "monetization_on",
-    price: 2442.81,
-    change: 2.41,
-    high24h: 2488.1,
-    low24h: 2390.44,
-    volume24h: "1.2B",
-    openInterest: "480M",
-    fundingRate: 0.0071,
+    binanceWs: "ethusdt@ticker",
+    coingeckoId: "ethereum",
+    seedPrice: 2400,
+    seedChange: 0,
   },
   {
-    symbol: "BTC/USDC",
-    label: "BITCOIN",
-    icon: "currency_bitcoin",
-    price: 64120.44,
-    change: -0.82,
-    high24h: 65200.0,
-    low24h: 63400.0,
-    volume24h: "3.8B",
-    openInterest: "1.4B",
-    fundingRate: 0.0095,
+    symbol: "SOL/USDC",
+    label: "SOLANA",
+    icon: "token",
+    binanceWs: "solusdt@ticker",
+    coingeckoId: "solana",
+    seedPrice: 140,
+    seedChange: 0,
+  },
+  {
+    symbol: "BNB/USDC",
+    label: "BNB",
+    icon: "toll",
+    binanceWs: "bnbusdt@ticker",
+    coingeckoId: "binancecoin",
+    seedPrice: 580,
+    seedChange: 0,
+  },
+  {
+    symbol: "AVAX/USDC",
+    label: "AVALANCHE",
+    icon: "rocket_launch",
+    binanceWs: "avaxusdt@ticker",
+    coingeckoId: "avalanche-2",
+    seedPrice: 28,
+    seedChange: 0,
+  },
+  {
+    symbol: "LINK/USDC",
+    label: "CHAINLINK",
+    icon: "link",
+    binanceWs: "linkusdt@ticker",
+    coingeckoId: "chainlink",
+    seedPrice: 14,
+    seedChange: 0,
   },
   {
     symbol: "JUP/USDC",
     label: "JUPITER",
     icon: "public",
-    price: 0.841,
-    change: 8.32,
-    high24h: 0.92,
-    low24h: 0.77,
-    volume24h: "18M",
-    openInterest: "6M",
-    fundingRate: 0.0112,
+    binanceWs: "jupusdt@ticker",
+    coingeckoId: "jupiter-exchange-solana",
+    seedPrice: 0.85,
+    seedChange: 0,
   },
   {
     symbol: "WIF/USDC",
     label: "DOGWIFHAT",
     icon: "pets",
-    price: 2.18,
-    change: -3.44,
-    high24h: 2.41,
-    low24h: 2.02,
-    volume24h: "42M",
-    openInterest: "15M",
-    fundingRate: 0.0155,
+    binanceWs: "wifusdt@ticker",
+    coingeckoId: "dogwifhat",
+    seedPrice: 2.2,
+    seedChange: 0,
   },
 ];
 
-export const LEVERAGE_OPTIONS = [1, 2, 5, 10, 20, 50];
-
-export const MAX_LEVERAGE = 50;
-export const MAINTENANCE_MARGIN_BPS = 50; // 0.5%
-
-/** Scale factor: 6 decimal places (μUSDC) */
-export const SCALE = 1_000_000n;
+/** Parse a dollar string like "142.50" into scaled bigint */
+export function parsePrice(s: string): bigint {
+  const [whole = "0", frac = ""] = s.split(".");
+  const fracPadded = (frac + "000000").slice(0, 6);
+  return BigInt(whole) * 1_000_000n + BigInt(fracPadded);
+}

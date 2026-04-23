@@ -1,17 +1,15 @@
 /**
  * TradingPanel.tsx
- *
- * Order entry panel. Shows the full encryption flow:
- * user fills in collateral/size/leverage → values are encrypted before being
- * sent to the Solana program → Arcium MPC computes liquidation price privately.
+ * Order entry panel — calls real Arcium MPC when wallet is connected.
+ * Falls back to mock mode when VITE_MOCK_ARCIUM=true.
  */
 
 import { useState } from "react";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { useWalletModal } from "@solana/wallet-adapter-react-ui";
 import { LEVERAGE_OPTIONS } from "../lib/constants";
-import { OpenPositionParams } from "../hooks/usePositions";
-import { ComputationStatus } from "../lib/arcium";
+import type { OpenPositionParams } from "../hooks/usePositions";
+import type { ComputationStatus } from "../lib/arcium";
 import EncryptionStatus from "./EncryptionStatus";
 
 interface Props {
@@ -45,24 +43,14 @@ export default function TradingPanel({
   const entryPrice = orderType === "limit" && limitPrice ? parseFloat(limitPrice) : currentPrice;
   const notional = collateralNum * leverage;
   const sizeTokens = notional / (entryPrice || 1);
+  const liqDist = entryPrice / leverage;
+  const liqPrice = side === "LONG" ? entryPrice - liqDist : entryPrice + liqDist;
 
-  // Liquidation price preview
-  const liqDistance = entryPrice / leverage;
-  const liqPrice =
-    side === "LONG"
-      ? entryPrice - liqDistance
-      : entryPrice + liqDistance;
-
-  const isDisabled =
-    computationStatus !== "idle" || isSubmitting || collateralNum <= 0;
+  const disabled = computationStatus !== "idle" || isSubmitting || collateralNum <= 0;
 
   async function handleSubmit() {
-    if (!connected) {
-      setVisible(true);
-      return;
-    }
-    if (isDisabled) return;
-
+    if (!connected) { setVisible(true); return; }
+    if (disabled) return;
     setIsSubmitting(true);
     try {
       await onOpenPosition({
@@ -78,18 +66,28 @@ export default function TradingPanel({
     }
   }
 
+  const C = {
+    border: "var(--color-border)",
+    text2: "var(--color-text-2)",
+    text3: "var(--color-text-3)",
+    green: "var(--color-green)",
+    red: "var(--color-red)",
+  };
+
   return (
     <div className="flex flex-col gap-3 h-full overflow-y-auto scroll-hide p-4">
 
-      {/* Order type tabs */}
-      <div className="flex border-b border-white/5">
+      {/* Order type */}
+      <div className="flex border-b" style={{ borderColor: C.border }}>
         {(["market", "limit"] as const).map((t) => (
           <button
             key={t}
             onClick={() => setOrderType(t)}
-            className={`px-4 py-2 text-xs font-mono font-semibold uppercase tracking-wider capitalize transition-all ${
-              orderType === t ? "tab-active" : "tab-inactive"
-            }`}
+            className="px-4 py-2 text-[10px] font-mono font-bold uppercase tracking-widest capitalize transition-all border-b-2"
+            style={{
+              color: orderType === t ? "white" : C.text3,
+              borderBottomColor: orderType === t ? C.green : "transparent",
+            }}
           >
             {t}
           </button>
@@ -98,29 +96,34 @@ export default function TradingPanel({
 
       {/* Long / Short */}
       <div className="grid grid-cols-2 gap-2">
-        <button
-          onClick={() => setSide("LONG")}
-          className={`py-3 rounded-lg text-sm font-bold uppercase tracking-wider transition-all ${
-            side === "LONG" ? "long-btn active" : "long-btn"
-          }`}
-        >
-          <span className="material-symbols-outlined text-[14px] align-middle mr-1">trending_up</span>
-          Long
-        </button>
-        <button
-          onClick={() => setSide("SHORT")}
-          className={`py-3 rounded-lg text-sm font-bold uppercase tracking-wider transition-all ${
-            side === "SHORT" ? "short-btn active" : "short-btn"
-          }`}
-        >
-          <span className="material-symbols-outlined text-[14px] align-middle mr-1">trending_down</span>
-          Short
-        </button>
+        {(["LONG", "SHORT"] as Side[]).map((s) => (
+          <button
+            key={s}
+            onClick={() => setSide(s)}
+            className="py-2.5 rounded-lg text-xs font-bold uppercase tracking-wider transition-all"
+            style={{
+              background: side === s
+                ? s === "LONG" ? "rgba(34,211,165,0.2)" : "rgba(248,113,113,0.18)"
+                : "rgba(255,255,255,0.03)",
+              border: `1px solid ${side === s
+                ? s === "LONG" ? "rgba(34,211,165,0.4)" : "rgba(248,113,113,0.35)"
+                : "rgba(255,255,255,0.06)"}`,
+              color: side === s
+                ? s === "LONG" ? C.green : C.red
+                : C.text3,
+            }}
+          >
+            <span className="material-symbols-outlined text-[13px] align-middle mr-1">
+              {s === "LONG" ? "trending_up" : "trending_down"}
+            </span>
+            {s}
+          </button>
+        ))}
       </div>
 
-      {/* Collateral input */}
+      {/* Collateral */}
       <div>
-        <label className="block text-[10px] text-zinc-500 uppercase tracking-widest font-mono mb-1">
+        <label className="block font-mono text-[9px] uppercase tracking-widest mb-1" style={{ color: C.text2 }}>
           Collateral (USDC)
         </label>
         <div className="relative">
@@ -129,18 +132,24 @@ export default function TradingPanel({
             value={collateral}
             onChange={(e) => setCollateral(e.target.value)}
             placeholder="0.00"
-            className="trading-input pr-14"
+            className="t-input pr-14"
           />
-          <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] text-zinc-500 font-mono">
+          <span className="absolute right-2 top-1/2 -translate-y-1/2 font-mono text-[9px]" style={{ color: C.text3 }}>
             USDC
           </span>
         </div>
-        <div className="flex gap-2 mt-2">
+        <div className="flex gap-1.5 mt-1.5">
           {[25, 50, 75, 100].map((pct) => (
             <button
               key={pct}
               onClick={() => setCollateral(String(Math.round(1000 * pct / 100)))}
-              className="flex-1 py-1 text-[10px] text-zinc-400 border border-white/10 rounded hover:bg-white/5 hover:text-white transition-all font-mono"
+              className="flex-1 py-0.5 text-[9px] font-mono rounded transition-all"
+              style={{
+                border: "1px solid var(--color-border)",
+                color: C.text3,
+              }}
+              onMouseEnter={(e) => (e.currentTarget.style.color = "white")}
+              onMouseLeave={(e) => (e.currentTarget.style.color = C.text3)}
             >
               {pct}%
             </button>
@@ -151,7 +160,7 @@ export default function TradingPanel({
       {/* Limit price */}
       {orderType === "limit" && (
         <div>
-          <label className="block text-[10px] text-zinc-500 uppercase tracking-widest font-mono mb-1">
+          <label className="block font-mono text-[9px] uppercase tracking-widest mb-1" style={{ color: C.text2 }}>
             Limit Price (USDC)
           </label>
           <input
@@ -159,7 +168,7 @@ export default function TradingPanel({
             value={limitPrice}
             onChange={(e) => setLimitPrice(e.target.value)}
             placeholder={currentPrice.toFixed(2)}
-            className="trading-input"
+            className="t-input"
           />
         </div>
       )}
@@ -167,29 +176,27 @@ export default function TradingPanel({
       {/* Leverage */}
       <div>
         <div className="flex justify-between items-center mb-1">
-          <label className="text-[10px] text-zinc-500 uppercase tracking-widest font-mono">
+          <label className="font-mono text-[9px] uppercase tracking-widest" style={{ color: C.text2 }}>
             Leverage
           </label>
-          <span className="text-sm text-white font-mono font-bold">{leverage}×</span>
+          <span className="font-mono text-sm font-bold" style={{ color: "white" }}>{leverage}×</span>
         </div>
         <input
-          type="range"
-          min={1}
-          max={50}
-          value={leverage}
+          type="range" min={1} max={50} value={leverage}
           onChange={(e) => setLeverage(Number(e.target.value))}
-          className="w-full accent-primary-container"
+          className="w-full"
         />
-        <div className="flex gap-1 mt-2">
+        <div className="flex gap-1 mt-1.5">
           {LEVERAGE_OPTIONS.map((l) => (
             <button
               key={l}
               onClick={() => setLeverage(l)}
-              className={`flex-1 py-1 text-[10px] rounded border font-mono transition-all ${
-                leverage === l
-                  ? "border-primary-container text-primary-container bg-primary-container/10"
-                  : "border-white/10 text-zinc-500 hover:text-zinc-200 hover:bg-white/5"
-              }`}
+              className="flex-1 py-0.5 text-[9px] font-mono rounded border transition-all"
+              style={{
+                borderColor: leverage === l ? C.green : "var(--color-border)",
+                color: leverage === l ? C.green : C.text3,
+                background: leverage === l ? "rgba(34,211,165,0.08)" : "transparent",
+              }}
             >
               {l}×
             </button>
@@ -197,75 +204,76 @@ export default function TradingPanel({
         </div>
       </div>
 
-      {/* Order Summary */}
-      <div className="glass-panel rounded-lg p-3 space-y-2 border border-white/5">
-        <div className="flex justify-between text-xs">
-          <span className="text-zinc-500 font-mono">Entry Price</span>
-          <span className="text-zinc-200 font-mono">
-            {orderType === "market" ? "~" : ""}${entryPrice.toFixed(2)}
-          </span>
-        </div>
-        <div className="flex justify-between text-xs">
-          <span className="text-zinc-500 font-mono">Position Size</span>
-          <span className="text-zinc-200 font-mono">
-            {sizeTokens.toFixed(4)} {market.split("/")[0]}
-          </span>
-        </div>
-        <div className="flex justify-between text-xs">
-          <span className="text-zinc-500 font-mono">Notional</span>
-          <span className="text-zinc-200 font-mono">${notional.toFixed(2)}</span>
-        </div>
-        <div className="flex justify-between text-xs border-t border-white/5 pt-2">
-          <span className="text-zinc-500 font-mono flex items-center gap-1">
-            <span className="material-symbols-outlined icon-filled text-[12px] text-tertiary">shield</span>
+      {/* Summary */}
+      <div className="rounded-lg p-3 space-y-1.5 border" style={{ border: "1px solid var(--color-border)", background: "rgba(0,0,0,0.25)" }}>
+        {[
+          { l: "Entry Price", v: `${orderType === "market" ? "~" : ""}$${entryPrice.toFixed(2)}` },
+          { l: "Position Size", v: `${sizeTokens.toFixed(4)} ${market.split("/")[0]}` },
+          { l: "Notional", v: `$${notional.toFixed(2)}` },
+        ].map((r) => (
+          <div key={r.l} className="flex justify-between text-[11px]">
+            <span className="font-mono" style={{ color: C.text3 }}>{r.l}</span>
+            <span className="font-mono" style={{ color: "var(--color-text)" }}>{r.v}</span>
+          </div>
+        ))}
+        <div className="flex justify-between text-[11px] border-t pt-1.5" style={{ borderColor: "var(--color-border)" }}>
+          <span className="font-mono flex items-center gap-1" style={{ color: C.text3 }}>
+            <span className="material-symbols-outlined icon-fill text-[10px]" style={{ color: C.green }}>shield</span>
             Est. Liq. Price
           </span>
-          <span className={`font-mono font-bold text-xs ${side === "LONG" ? "text-error" : "text-tertiary"}`}>
-            ${liqPrice.toFixed(2)} <span className="text-[9px] text-zinc-600">(encrypted by MPC)</span>
+          <span className="font-mono font-bold" style={{ color: side === "LONG" ? C.red : C.green }}>
+            ${liqPrice.toFixed(2)}{" "}
+            <span className="font-normal text-[9px]" style={{ color: C.text3 }}>(MPC encrypted)</span>
           </span>
         </div>
       </div>
 
       {/* Privacy notice */}
-      <div className="flex items-start gap-2 px-3 py-2 bg-tertiary/5 border border-tertiary/15 rounded-lg">
-        <span className="material-symbols-outlined icon-filled text-tertiary text-[14px] mt-0.5 shrink-0">lock</span>
-        <p className="text-[10px] text-zinc-400 leading-relaxed">
-          Position size, entry price, and liquidation threshold are{" "}
-          <span className="text-tertiary font-bold">encrypted by Arcium MPC</span>.
+      <div
+        className="flex items-start gap-2 px-3 py-2 rounded-lg"
+        style={{ background: "rgba(34,211,165,0.05)", border: "1px solid rgba(34,211,165,0.12)" }}
+      >
+        <span className="material-symbols-outlined icon-fill text-[13px] mt-0.5 shrink-0" style={{ color: C.green }}>lock</span>
+        <p className="font-mono text-[9px] leading-relaxed" style={{ color: C.text2 }}>
+          Size, entry & leverage{" "}
+          <span style={{ color: C.green }} className="font-bold">encrypted by Arcium MPC</span>.
           Only you can decrypt your PnL.
         </p>
       </div>
 
-      {/* Arcium computation status */}
+      {/* Arcium status */}
       <EncryptionStatus status={computationStatus} lastTxSig={lastTxSig} />
 
-      {/* Submit button */}
+      {/* Submit */}
       <button
         onClick={handleSubmit}
-        disabled={isDisabled && connected}
-        className={`w-full py-4 rounded-xl font-bold text-sm uppercase tracking-wider transition-all duration-200 flex items-center justify-center gap-2 ${
-          !connected
-            ? "bg-primary-container text-white hover:brightness-110 active:scale-[0.98] shadow-lg shadow-primary-container/20"
-            : side === "LONG"
-            ? `bg-tertiary/20 border border-tertiary/40 text-tertiary hover:bg-tertiary/30 active:scale-[0.98] ${isDisabled ? "opacity-50 cursor-not-allowed" : ""}`
-            : `bg-error/20 border border-error/40 text-error hover:bg-error/30 active:scale-[0.98] ${isDisabled ? "opacity-50 cursor-not-allowed" : ""}`
-        }`}
+        disabled={disabled && connected}
+        className="w-full py-3.5 rounded-xl font-bold text-sm uppercase tracking-wider transition-all flex items-center justify-center gap-2"
+        style={{
+          background: !connected ? "rgba(167,139,250,0.2)" :
+                      side === "LONG" ? "rgba(34,211,165,0.15)" : "rgba(248,113,113,0.15)",
+          border: `1px solid ${!connected ? "rgba(167,139,250,0.35)" :
+                  side === "LONG" ? "rgba(34,211,165,0.35)" : "rgba(248,113,113,0.35)"}`,
+          color: !connected ? "#A78BFA" :
+                 side === "LONG" ? C.green : C.red,
+          opacity: disabled && connected ? 0.5 : 1,
+          cursor: disabled && connected ? "not-allowed" : "pointer",
+        }}
       >
         {!connected ? (
           <>
-            <span className="material-symbols-outlined text-[16px]">account_balance_wallet</span>
+            <span className="material-symbols-outlined text-[15px]">account_balance_wallet</span>
             Connect Wallet
           </>
         ) : computationStatus !== "idle" ? (
           <>
-            <span className="material-symbols-outlined text-[16px] animate-spin">sync</span>
-            {computationStatus === "encrypting" ? "Encrypting..." :
-             computationStatus === "mpc_computing" ? "MPC Computing..." :
-             "Processing..."}
+            <span className="material-symbols-outlined text-[15px] animate-spin">sync</span>
+            {computationStatus === "encrypting" ? "Encrypting…" :
+             computationStatus === "mpc_computing" ? "MPC Computing…" : "Processing…"}
           </>
         ) : (
           <>
-            <span className="material-symbols-outlined icon-filled text-[16px]">
+            <span className="material-symbols-outlined icon-fill text-[15px]">
               {side === "LONG" ? "trending_up" : "trending_down"}
             </span>
             {side === "LONG" ? "Open Long" : "Open Short"} {leverage}×

@@ -1,140 +1,158 @@
 /**
  * EncryptionStatus.tsx
- *
- * Shows the real-time Arcium MPC computation status.
- * Displays the privacy pipeline: Encrypt → Queue → MPC → Callback
+ * Visual pipeline: Encrypt → Queue → MPC → Callback → Done
  */
 
-import { ComputationStatus, statusLabel, statusColor } from "../lib/arcium";
+import type { ComputationStatus } from "../lib/arcium";
 
 interface Props {
   status: ComputationStatus;
   lastTxSig?: string | null;
 }
 
-const PIPELINE_STEPS: { key: ComputationStatus; label: string }[] = [
-  { key: "encrypting", label: "Encrypt" },
-  { key: "queuing", label: "Queue" },
-  { key: "mpc_computing", label: "MPC" },
-  { key: "awaiting_callback", label: "Callback" },
-  { key: "done", label: "Done" },
+const STEPS: { key: ComputationStatus; label: string; icon: string }[] = [
+  { key: "encrypting",         label: "Encrypt",  icon: "lock"          },
+  { key: "queuing",            label: "Queue",    icon: "send"          },
+  { key: "mpc_computing",      label: "MPC",      icon: "memory"        },
+  { key: "awaiting_callback",  label: "Callback", icon: "wifi_tethering"},
+  { key: "done",               label: "Done",     icon: "check_circle"  },
 ];
 
-const STEP_ORDER: ComputationStatus[] = [
-  "encrypting",
-  "queuing",
-  "mpc_computing",
-  "awaiting_callback",
-  "done",
-];
+const ORDER: ComputationStatus[] = ["encrypting","queuing","mpc_computing","awaiting_callback","done"];
 
-function isCompleted(current: ComputationStatus, step: ComputationStatus): boolean {
-  const ci = STEP_ORDER.indexOf(current);
-  const si = STEP_ORDER.indexOf(step);
-  return ci > si;
+function completed(cur: ComputationStatus, step: ComputationStatus) {
+  return ORDER.indexOf(cur) > ORDER.indexOf(step);
 }
 
-function isActive(current: ComputationStatus, step: ComputationStatus): boolean {
-  return current === step;
+function active(cur: ComputationStatus, step: ComputationStatus) {
+  return cur === step;
 }
 
 export default function EncryptionStatus({ status, lastTxSig }: Props) {
-  const isRunning = status !== "idle" && status !== "error";
+  const running = status !== "idle" && status !== "error";
 
   return (
-    <div className={`glass-panel rounded-xl p-4 border border-white/5 ${isRunning ? "encryption-glow" : ""}`}>
+    <div
+      className={`rounded-xl p-3.5 border transition-all ${running ? "enc-glow" : ""}`}
+      style={{
+        background: "rgba(8,10,15,0.7)",
+        borderColor: running ? "rgba(34,211,165,0.2)" : "var(--color-border)",
+      }}
+    >
       {/* Header */}
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-2">
           <span
-            className={`material-symbols-outlined icon-filled text-[16px] ${
-              status === "done" ? "text-tertiary" :
-              status === "error" ? "text-error" :
-              isRunning ? "text-primary animate-pulse" : "text-zinc-500"
+            className={`material-symbols-outlined icon-fill text-[15px] ${
+              status === "done" ? "text-green-400" :
+              status === "error" ? "text-red-400" :
+              running ? "animate-pulse" : ""
             }`}
+            style={{
+              color: status === "done" ? "var(--color-green)" :
+                     status === "error" ? "var(--color-red)" :
+                     running ? "var(--color-green)" : "var(--color-text-3)",
+            }}
           >
             {status === "done" ? "verified_user" : status === "error" ? "error" : "shield"}
           </span>
-          <span className="text-[10px] font-mono font-bold uppercase tracking-widest text-zinc-400">
-            Arcium Secure Computation
+          <span className="font-mono text-[9px] uppercase tracking-widest font-bold" style={{ color: "var(--color-text-2)" }}>
+            Arcium Computation
           </span>
         </div>
-        {isRunning && (
-          <span className="flex items-center gap-1">
-            <span className="w-1.5 h-1.5 rounded-full bg-primary animate-ping" />
-            <span className="text-[10px] text-primary font-mono">LIVE</span>
-          </span>
+        {running && (
+          <div className="flex items-center gap-1">
+            <span className="live-dot" style={{ width: 6, height: 6 }} />
+            <span className="font-mono text-[9px] font-bold uppercase" style={{ color: "var(--color-green)" }}>
+              Live
+            </span>
+          </div>
         )}
       </div>
 
       {/* Pipeline steps */}
-      {isRunning || status === "done" ? (
-        <div className="flex items-center gap-1 mb-3">
-          {PIPELINE_STEPS.map((step, i) => (
-            <div key={step.key} className="flex items-center flex-1">
-              <div className="flex flex-col items-center flex-1">
-                <div
-                  className={`w-6 h-6 rounded-full flex items-center justify-center border text-[10px] font-bold transition-all duration-300 ${
-                    isCompleted(status, step.key)
-                      ? "bg-tertiary border-tertiary text-black"
-                      : isActive(status, step.key)
-                      ? "border-primary bg-primary/20 text-primary animate-pulse"
-                      : "border-white/10 text-zinc-600"
-                  }`}
-                >
-                  {isCompleted(status, step.key) ? (
-                    <span className="material-symbols-outlined text-[12px] icon-filled">check</span>
-                  ) : (
-                    i + 1
-                  )}
+      {(running || status === "done") && (
+        <div className="flex items-center gap-0.5 mb-3">
+          {STEPS.map((step, i) => {
+            const done = completed(status, step.key);
+            const act = active(status, step.key);
+            return (
+              <div key={step.key} className="flex items-center flex-1 min-w-0">
+                <div className="flex flex-col items-center flex-1">
+                  <div
+                    className={`w-6 h-6 rounded-full flex items-center justify-center border text-[9px] font-bold transition-all duration-300 ${
+                      done ? "border-none" : act ? "animate-pulse" : ""
+                    }`}
+                    style={{
+                      background: done ? "var(--color-green)" : act ? "rgba(34,211,165,0.15)" : "rgba(255,255,255,0.04)",
+                      borderColor: done ? "transparent" : act ? "var(--color-green)" : "rgba(255,255,255,0.08)",
+                    }}
+                  >
+                    {done ? (
+                      <span className="material-symbols-outlined icon-fill text-[11px] text-black">check</span>
+                    ) : (
+                      <span
+                        className={`material-symbols-outlined text-[11px] ${act ? "" : ""}`}
+                        style={{ color: act ? "var(--color-green)" : "var(--color-text-3)" }}
+                      >
+                        {step.icon}
+                      </span>
+                    )}
+                  </div>
+                  <span
+                    className="font-mono text-[7px] mt-0.5 uppercase tracking-wider truncate w-full text-center"
+                    style={{
+                      color: done ? "var(--color-green)" : act ? "var(--color-green)" : "var(--color-text-3)",
+                    }}
+                  >
+                    {step.label}
+                  </span>
                 </div>
-                <span className={`text-[8px] mt-1 font-mono uppercase tracking-wider ${
-                  isCompleted(status, step.key) ? "text-tertiary" :
-                  isActive(status, step.key) ? "text-primary" : "text-zinc-600"
-                }`}>
-                  {step.label}
-                </span>
+                {i < STEPS.length - 1 && (
+                  <div
+                    className="h-px flex-1 mx-0.5 mb-4 transition-all duration-500"
+                    style={{ background: done ? "var(--color-green)" : "rgba(255,255,255,0.08)" }}
+                  />
+                )}
               </div>
-              {i < PIPELINE_STEPS.length - 1 && (
-                <div className={`h-px flex-1 mx-1 transition-all duration-500 ${
-                  isCompleted(status, step.key) ? "bg-tertiary" : "bg-white/10"
-                }`} />
-              )}
-            </div>
-          ))}
+            );
+          })}
         </div>
-      ) : null}
+      )}
 
       {/* Status text */}
-      <div className="flex items-center justify-between">
-        <p className={`text-[10px] uppercase tracking-widest font-mono ${statusColor(status)}`}>
-          {statusLabel(status)}
+      <div className="flex justify-between items-center">
+        <p
+          className="font-mono text-[9px] uppercase tracking-widest"
+          style={{
+            color: status === "done" ? "var(--color-green)" :
+                   status === "error" ? "var(--color-red)" :
+                   running ? "var(--color-green)" : "var(--color-text-3)",
+          }}
+        >
+          {status === "idle" ? "Ready · MPC + TEE Active" :
+           status === "encrypting" ? "Encrypting inputs…" :
+           status === "queuing" ? "Queuing to Arcium…" :
+           status === "mpc_computing" ? "MPC nodes computing…" :
+           status === "awaiting_callback" ? "Awaiting on-chain callback…" :
+           status === "done" ? "Computation complete ✓" :
+           "Error"}
         </p>
-        {status === "idle" && (
-          <p className="text-[9px] text-zinc-600 uppercase tracking-widest font-mono">
-            MPC + TEE READY
-          </p>
-        )}
       </div>
 
-      {/* Last tx sig */}
+      {/* Tx sig on done */}
       {lastTxSig && status === "done" && (
-        <div className="mt-2 pt-2 border-t border-white/5">
-          <p className="text-[9px] text-zinc-600 font-mono truncate">
+        <div className="mt-2 pt-2 border-t" style={{ borderColor: "var(--color-border)" }}>
+          <p className="font-mono text-[8px] truncate" style={{ color: "var(--color-text-3)" }}>
             TX: {lastTxSig}
           </p>
         </div>
       )}
 
-      {/* Invariant bar */}
+      {/* Idle bar */}
       {status === "idle" && (
-        <div className="mt-2">
-          <div className="h-1 w-full bg-white/5 rounded-full overflow-hidden">
-            <div className="h-full bg-tertiary/50 w-full" />
-          </div>
-          <p className="text-[8px] text-zinc-600 mt-1 uppercase tracking-widest">
-            Encryption layer active
-          </p>
+        <div className="mt-2 h-0.5 w-full rounded-full overflow-hidden" style={{ background: "rgba(255,255,255,0.04)" }}>
+          <div className="h-full rounded-full" style={{ width: "100%", background: "var(--color-green)", opacity: 0.35 }} />
         </div>
       )}
     </div>

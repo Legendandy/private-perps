@@ -1,33 +1,23 @@
 import React, { useMemo } from "react";
 import ReactDOM from "react-dom/client";
-import {
-  ConnectionProvider,
-  WalletProvider,
-} from "@solana/wallet-adapter-react";
+import { ConnectionProvider, WalletProvider } from "@solana/wallet-adapter-react";
 import { WalletModalProvider } from "@solana/wallet-adapter-react-ui";
-import {
-  PhantomWalletAdapter,
-  SolflareWalletAdapter,
-} from "@solana/wallet-adapter-wallets";
+import { PhantomWalletAdapter, SolflareWalletAdapter } from "@solana/wallet-adapter-wallets";
 import { clusterApiUrl } from "@solana/web3.js";
 import App from "./App";
 import "./index.css";
 import "@solana/wallet-adapter-react-ui/styles.css";
 
-const RPC_ENDPOINT =
-  import.meta.env.VITE_RPC_ENDPOINT ?? clusterApiUrl("devnet");
+const RPC = import.meta.env.VITE_RPC_URL ?? clusterApiUrl("devnet");
 
 function Root() {
-  const wallets = useMemo(
-    () => [
-      new PhantomWalletAdapter(),
-      new SolflareWalletAdapter(),
-    ],
-    []
-  );
+  const wallets = useMemo(() => [
+    new PhantomWalletAdapter(),
+    new SolflareWalletAdapter(),
+  ], []);
 
   return (
-    <ConnectionProvider endpoint={RPC_ENDPOINT}>
+    <ConnectionProvider endpoint={RPC}>
       <WalletProvider wallets={wallets} autoConnect>
         <WalletModalProvider>
           <App />

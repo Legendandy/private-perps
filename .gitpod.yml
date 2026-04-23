@@ -1,0 +1,8 @@
+image: gitpod/workspace-full
+
+tasks:
+  - init: |
+      docker --version || true
+
+services:
+  - docker
