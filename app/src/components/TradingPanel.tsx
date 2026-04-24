@@ -52,15 +52,31 @@ export default function TradingPanel({
     if (!connected) { setVisible(true); return; }
     if (disabled) return;
     setIsSubmitting(true);
+
+    const params: OpenPositionParams = {
+      market,
+      direction: side,
+      collateralUsdc: collateralNum,
+      sizeTokens,
+      entryPrice,
+      leverageX: leverage,
+    };
+
+    console.log("=== OPEN POSITION DEBUG ===");
+    console.log("VITE_MOCK_ARCIUM:", import.meta.env.VITE_MOCK_ARCIUM);
+    console.log("VITE_PROGRAM_ID:", import.meta.env.VITE_PROGRAM_ID);
+    console.log("VITE_RPC_URL:", import.meta.env.VITE_RPC_URL);
+    console.log("VITE_BACKEND_API_BASE:", import.meta.env.VITE_BACKEND_API_BASE);
+    console.log("params:", JSON.stringify(params, null, 2));
+    console.log("collateralNum:", collateralNum);
+    console.log("entryPrice:", entryPrice);
+    console.log("sizeTokens:", sizeTokens);
+    console.log("currentPrice:", currentPrice);
+
     try {
-      await onOpenPosition({
-        market,
-        direction: side,
-        collateralUsdc: collateralNum,
-        sizeTokens,
-        entryPrice,
-        leverageX: leverage,
-      });
+      await onOpenPosition(params);
+    } catch (e) {
+      console.error("openPosition error:", e);
     } finally {
       setIsSubmitting(false);
     }
