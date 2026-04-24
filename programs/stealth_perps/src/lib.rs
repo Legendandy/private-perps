@@ -23,7 +23,7 @@ impl From<ErrorCode> for anchor_lang::error::Error {
     }
 }
 
-declare_id!("57dAxRF57a33kHwa51Xhd4eNjLg7vc7Q1phfMKS4xtfy");
+declare_id!("3DHnmtHxAkKq6oMzydRMNS7yduYT4Ee1ecAdXWniEGzx");
 
 const COMP_DEF_OFFSET_OPEN_POSITION: u32     = comp_def_offset("open_position");
 const COMP_DEF_OFFSET_CHECK_LIQUIDATION: u32 = comp_def_offset("check_liquidation");

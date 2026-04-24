@@ -8,7 +8,7 @@ members = ["programs/stealth-perps"]
 stealth_perps = "StLtHpErPs1111111111111111111111111111111111"
 
 [programs.devnet]
-stealth_perps = "REPLACE_WITH_YOUR_DEPLOYED_PROGRAM_ID"
+stealth_perps = "57dAxRF57a33kHwa51Xhd4eNjLg7vc7Q1phfMKS4xtfy"
 
 [clusters.localnet]
 offset = 0

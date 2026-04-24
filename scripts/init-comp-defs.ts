@@ -85,7 +85,7 @@ async function main() {
   const mxeAccount = getMXEAccAddress(program.programId);
   console.log("MXE Account:", mxeAccount.toBase58());
 
-  const addressLookupTable = new anchor.web3.PublicKey("3Bxhq5TYdGwD4uAPZYpMYoNUyyksYvUrDfAz51c6iWwd");
+  const addressLookupTable = new anchor.web3.PublicKey("88TPSRXfGTzf2hTKoQHMFytd7DQn28Q9fy8xGzHumhZU");
   console.log("LUT:", addressLookupTable.toBase58());
 
   await initCompDef(program, provider, "initOpenPositionCompDef",     "open_position",     mxeAccount, addressLookupTable, "[1/4]");
