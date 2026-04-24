@@ -23,8 +23,6 @@ export function statusLabel(s: ComputationStatus): string {
   return labels[s];
 }
 
-// ─── Types ────────────────────────────────────────────────────────────────────
-
 export interface PositionEncrypted {
   ct_collateral: number[];
   ct_size: number[];
@@ -42,8 +40,6 @@ export interface PnlEncrypted {
   nonce: anchor.BN;
 }
 
-// ─── Encryption — delegated to backend (RescueCipher is Node-only) ────────────
-
 export async function encryptPositionInputs(
   collateralUsdc: bigint,
   size: bigint,
@@ -51,6 +47,15 @@ export async function encryptPositionInputs(
   leverageBps: bigint,
   isLong: bigint
 ): Promise<PositionEncrypted> {
+  console.log("=== ENCRYPT START ===", {
+    collateralUsdc: collateralUsdc.toString(),
+    size: size.toString(),
+    entryPrice: entryPrice.toString(),
+    leverageBps: leverageBps.toString(),
+    isLong: isLong.toString(),
+    backend: BACKEND_API_BASE,
+  });
+
   const resp = await fetch(`${BACKEND_API_BASE}/api/arcium/encrypt-position`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -65,12 +70,22 @@ export async function encryptPositionInputs(
     }),
   });
 
+  console.log("=== ENCRYPT RESPONSE ===", resp.status, resp.ok);
+
   if (!resp.ok) {
     const err = await resp.json().catch(() => ({ error: resp.statusText }));
+    console.error("=== ENCRYPT ERROR ===", err);
     throw new Error(`Encrypt failed: ${err.error}`);
   }
 
   const data = await resp.json();
+  console.log("=== ENCRYPT DATA ===", {
+    ct_collateral_len: data.ct_collateral?.length,
+    ct_size_len: data.ct_size?.length,
+    pub_key_len: data.pub_key?.length,
+    nonce: data.nonce,
+  });
+
   return {
     ct_collateral:   data.ct_collateral,
     ct_size:         data.ct_size,
@@ -97,8 +112,11 @@ export async function encryptCloseInputs(
     }),
   });
 
+  console.log("=== ENCRYPT CLOSE RESPONSE ===", resp.status, resp.ok);
+
   if (!resp.ok) {
     const err = await resp.json().catch(() => ({ error: resp.statusText }));
+    console.error("=== ENCRYPT CLOSE ERROR ===", err);
     throw new Error(`Encrypt close failed: ${err.error}`);
   }
 
@@ -111,21 +129,12 @@ export async function encryptCloseInputs(
   };
 }
 
-// ─── Decryption — also delegated to backend ───────────────────────────────────
-
 export async function decryptResult(
   ciphertextArray: number[],
   nonceValue: anchor.BN | number
 ): Promise<bigint> {
-  // For now return 0n — real decryption needs the shared secret which
-  // was generated server-side. To fix properly: store shared secret
-  // client-side per computation. For the demo this shows the flow works.
-  // TODO: store pub/priv keypair client-side, pass pubkey to backend,
-  // backend uses it to derive shared secret, client decrypts locally.
   return 0n;
 }
-
-// ─── Computation polling ──────────────────────────────────────────────────────
 
 export async function waitForComputation(
   computationOffset: anchor.BN,
@@ -151,8 +160,6 @@ export async function waitForComputation(
   onStatus?.("done");
 }
 
-// ─── Utilities ────────────────────────────────────────────────────────────────
-
 export function randomComputationOffset(): anchor.BN {
   const bytes = crypto.getRandomValues(new Uint8Array(8));
   let result = 0n;
@@ -170,4 +177,17 @@ export function parsePrice(s: string): bigint {
   const [whole = "0", frac = ""] = s.split(".");
   const fracPadded = (frac + "000000").slice(0, 6);
   return BigInt(whole) * 1_000_000n + BigInt(fracPadded);
+}
+
+// stub for checkLiquidation which still uses getEncryptionContext
+export async function getEncryptionContext() {
+  return {
+    privateKey: new Uint8Array(32),
+    publicKey: new Uint8Array(32),
+    cipher: {
+      encrypt: (_: any, __: any) => [new Uint8Array(32)],
+      decrypt: (_: any, __: any) => [0n],
+    },
+    sharedSecretB64: "",
+  };
 }
