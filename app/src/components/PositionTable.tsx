@@ -19,6 +19,7 @@ type Tab = "positions" | "orders" | "history";
 export default function PositionTable({ positions, currentPrices, onClose }: Props) {
   const [tab, setTab] = useState<Tab>("positions");
   const [revealed, setRevealed] = useState<Record<string, boolean>>({});
+  const [closing, setClosing] = useState<Record<string, boolean>>({});
 
   const open = positions.filter((p) => p.status === "open" || p.status === "pending_close");
   const closed = positions.filter((p) => p.status === "closed" || p.status === "liquidated");
@@ -30,6 +31,16 @@ export default function PositionTable({ positions, currentPrices, onClose }: Pro
     green: "var(--color-green)",
     red: "var(--color-red)",
   };
+
+  async function handleClose(id: string, exitPrice: number) {
+    if (closing[id]) return;
+    setClosing((prev) => ({ ...prev, [id]: true }));
+    try {
+      await onClose(id, exitPrice);
+    } finally {
+      setClosing((prev) => ({ ...prev, [id]: false }));
+    }
+  }
 
   return (
     <div
@@ -91,6 +102,7 @@ export default function PositionTable({ positions, currentPrices, onClose }: Pro
                   const mark = currentPrices[pos.market] ?? pos.entryPrice;
                   const pnl = pos.unrealizedPnl;
                   const isRev = revealed[pos.id];
+                  const isClosing = closing[pos.id] || pos.status === "pending_close";
 
                   return (
                     <tr
@@ -148,17 +160,20 @@ export default function PositionTable({ positions, currentPrices, onClose }: Pro
                         </div>
                       </td>
                       <td className="px-5 py-2.5 text-right">
-                        {pos.status === "pending_close" ? (
+                        {isClosing ? (
                           <span className="font-mono text-[9px] animate-pulse" style={{ color: C.text2 }}>Closing…</span>
                         ) : (
                           <button
-                            onClick={() => onClose(pos.id, mark)}
+                            onClick={() => handleClose(pos.id, mark)}
+                            disabled={isClosing}
                             className="px-3 py-1 font-mono text-[9px] font-bold uppercase tracking-wider rounded border transition-all"
                             style={{
                               border: `1px solid rgba(248,113,113,0.3)`,
                               color: C.red,
+                              opacity: isClosing ? 0.5 : 1,
+                              cursor: isClosing ? "not-allowed" : "pointer",
                             }}
-                            onMouseEnter={(e) => (e.currentTarget.style.background = "rgba(248,113,113,0.1)")}
+                            onMouseEnter={(e) => !isClosing && (e.currentTarget.style.background = "rgba(248,113,113,0.1)")}
                             onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
                           >
                             Close
