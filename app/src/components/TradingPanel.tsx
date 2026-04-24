@@ -1,7 +1,6 @@
 /**
  * TradingPanel.tsx
  * Order entry panel — calls real Arcium MPC when wallet is connected.
- * Falls back to mock mode when VITE_MOCK_ARCIUM=true.
  */
 
 import { useState } from "react";
@@ -33,20 +32,23 @@ export default function TradingPanel({
   const { setVisible } = useWalletModal();
 
   const [side, setSide] = useState<Side>("LONG");
-  const [collateral, setCollateral] = useState("100");
+  const [collateral, setCollateral] = useState("1");
   const [leverage, setLeverage] = useState(10);
   const [orderType, setOrderType] = useState<"market" | "limit">("market");
   const [limitPrice, setLimitPrice] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const collateralNum = parseFloat(collateral) || 0;
+  const baseToken = market.split("/")[0]; // e.g. "BTC", "SOL"
+
+  const collateralSol = parseFloat(collateral) || 0;
   const entryPrice = orderType === "limit" && limitPrice ? parseFloat(limitPrice) : currentPrice;
-  const notional = collateralNum * leverage;
+  const collateralUsd = collateralSol * entryPrice;
+  const notional = collateralUsd * leverage;
   const sizeTokens = notional / (entryPrice || 1);
   const liqDist = entryPrice / leverage;
   const liqPrice = side === "LONG" ? entryPrice - liqDist : entryPrice + liqDist;
 
-  const disabled = computationStatus !== "idle" || isSubmitting || collateralNum <= 0;
+  const disabled = computationStatus !== "idle" || isSubmitting || collateralSol <= 0;
 
   async function handleSubmit() {
     if (!connected) { setVisible(true); return; }
@@ -56,7 +58,7 @@ export default function TradingPanel({
     const params: OpenPositionParams = {
       market,
       direction: side,
-      collateralUsdc: collateralNum,
+      collateralUsdc: collateralSol,   // SOL amount
       sizeTokens,
       entryPrice,
       leverageX: leverage,
@@ -68,7 +70,8 @@ export default function TradingPanel({
     console.log("VITE_RPC_URL:", import.meta.env.VITE_RPC_URL);
     console.log("VITE_BACKEND_API_BASE:", import.meta.env.VITE_BACKEND_API_BASE);
     console.log("params:", JSON.stringify(params, null, 2));
-    console.log("collateralNum:", collateralNum);
+    console.log("collateralSol:", collateralSol);
+    console.log("collateralUsd:", collateralUsd);
     console.log("entryPrice:", entryPrice);
     console.log("sizeTokens:", sizeTokens);
     console.log("currentPrice:", currentPrice);
@@ -140,7 +143,7 @@ export default function TradingPanel({
       {/* Collateral */}
       <div>
         <label className="block font-mono text-[9px] uppercase tracking-widest mb-1" style={{ color: C.text2 }}>
-          Collateral (USDC)
+          Collateral ({baseToken})
         </label>
         <div className="relative">
           <input
@@ -151,14 +154,19 @@ export default function TradingPanel({
             className="t-input pr-14"
           />
           <span className="absolute right-2 top-1/2 -translate-y-1/2 font-mono text-[9px]" style={{ color: C.text3 }}>
-            USDC
+            {baseToken}
           </span>
         </div>
+        {collateralSol > 0 && entryPrice > 0 && (
+          <p className="font-mono text-[9px] mt-1" style={{ color: C.text3 }}>
+            ≈ ${collateralUsd.toFixed(2)} USD
+          </p>
+        )}
         <div className="flex gap-1.5 mt-1.5">
           {[25, 50, 75, 100].map((pct) => (
             <button
               key={pct}
-              onClick={() => setCollateral(String(Math.round(1000 * pct / 100)))}
+              onClick={() => setCollateral(String((10 * pct / 100).toFixed(4)))}
               className="flex-1 py-0.5 text-[9px] font-mono rounded transition-all"
               style={{
                 border: "1px solid var(--color-border)",
@@ -177,7 +185,7 @@ export default function TradingPanel({
       {orderType === "limit" && (
         <div>
           <label className="block font-mono text-[9px] uppercase tracking-widest mb-1" style={{ color: C.text2 }}>
-            Limit Price (USDC)
+            Limit Price (USD)
           </label>
           <input
             type="number"
@@ -223,9 +231,10 @@ export default function TradingPanel({
       {/* Summary */}
       <div className="rounded-lg p-3 space-y-1.5 border" style={{ border: "1px solid var(--color-border)", background: "rgba(0,0,0,0.25)" }}>
         {[
-          { l: "Entry Price", v: `${orderType === "market" ? "~" : ""}$${entryPrice.toFixed(2)}` },
-          { l: "Position Size", v: `${sizeTokens.toFixed(4)} ${market.split("/")[0]}` },
-          { l: "Notional", v: `$${notional.toFixed(2)}` },
+          { l: "Entry Price",    v: `${orderType === "market" ? "~" : ""}$${entryPrice.toFixed(2)}` },
+          { l: "Collateral",     v: `${collateralSol.toFixed(4)} ${baseToken} ($${collateralUsd.toFixed(2)})` },
+          { l: "Position Size",  v: `${sizeTokens.toFixed(4)} ${baseToken}` },
+          { l: "Notional",       v: `$${notional.toFixed(2)}` },
         ].map((r) => (
           <div key={r.l} className="flex justify-between text-[11px]">
             <span className="font-mono" style={{ color: C.text3 }}>{r.l}</span>
