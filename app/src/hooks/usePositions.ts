@@ -68,8 +68,9 @@ export function usePositions() {
   }
 
   function getProgram(provider: anchor.AnchorProvider) {
-    return new Program(IDL, new PublicKey(PROGRAM_ID), provider);
-  }
+  anchor.setProvider(provider);
+  return new Program(IDL, provider);
+}
 
   const openPosition = useCallback(
     async (params: OpenPositionParams) => {
