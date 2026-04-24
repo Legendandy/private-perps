@@ -26,7 +26,8 @@ export interface Position {
   id: string;
   market: string;
   direction: "LONG" | "SHORT";
-  collateralUsdc: number;
+  collateralSol: number;       // SOL amount
+  collateralUsd: number;       // USD value at entry
   sizeTokens: number;
   entryPrice: number;
   leverageX: number;
@@ -45,7 +46,7 @@ export interface Position {
 export interface OpenPositionParams {
   market: string;
   direction: "LONG" | "SHORT";
-  collateralUsdc: number;
+  collateralUsdc: number;   // SOL amount (field name kept for compat)
   sizeTokens: number;
   entryPrice: number;
   leverageX: number;
@@ -109,14 +110,22 @@ export function usePositions() {
         throw e;
       }
 
-      const collateralUsdc = BigInt(Math.round(params.collateralUsdc * 1_000_000));
-      const size = BigInt(Math.round(params.sizeTokens * 1_000_000));
+      // collateralUsdc field holds SOL amount — scale to lamports (9 decimals)
+      const collateralSol = params.collateralUsdc;
+      const collateralLamports = BigInt(Math.round(collateralSol * 1_000_000_000));
+
+      // size in lamports too
+      const size = BigInt(Math.round(params.sizeTokens * 1_000_000_000));
+
+      // price scaled to 6 decimals (μUSD)
       const entryPrice = parsePrice(params.entryPrice.toFixed(6));
       const leverageBps = BigInt(params.leverageX * 100);
       const isLong = params.direction === "LONG";
 
       console.log("=== PARAMS TO ARCIUM ===", {
-        collateralUsdc: collateralUsdc.toString(),
+        collateralLamports: collateralLamports.toString(),
+        collateralSol,
+        collateralUsd: (collateralSol * params.entryPrice).toFixed(2),
         size: size.toString(),
         entryPrice: entryPrice.toString(),
         leverageBps: leverageBps.toString(),
@@ -129,15 +138,24 @@ export function usePositions() {
         const result = await arciumOpenPosition(
           program,
           provider.wallet,
-          { collateralUsdc, size, entryPrice, leverageBps, isLong },
+          {
+            collateralUsdc: collateralLamports,
+            size,
+            entryPrice,
+            leverageBps,
+            isLong,
+          },
           setComputationStatus
         );
+
+        const collateralUsd = collateralSol * params.entryPrice;
 
         const position: Position = {
           id: `pos_${result.computationOffset.toString(16)}`,
           market: params.market,
           direction: params.direction,
-          collateralUsdc: params.collateralUsdc,
+          collateralSol,
+          collateralUsd,
           sizeTokens: params.sizeTokens,
           entryPrice: params.entryPrice,
           leverageX: params.leverageX,
@@ -196,7 +214,12 @@ export function usePositions() {
         setPositions((prev) =>
           prev.map((p) =>
             p.id === positionId
-              ? { ...p, status: "closed" as const, unrealizedPnl: Number(result.pnl) / 1_000_000, txSig: result.txSig }
+              ? {
+                  ...p,
+                  status: "closed" as const,
+                  unrealizedPnl: Number(result.pnl) / 1_000_000,
+                  txSig: result.txSig,
+                }
               : p
           )
         );
@@ -220,9 +243,16 @@ export function usePositions() {
         prev.map((pos) => {
           if (pos.status !== "open") return pos;
           const mark = marketPrices[pos.market] ?? pos.entryPrice;
-          const priceDiff = pos.direction === "LONG" ? mark - pos.entryPrice : pos.entryPrice - mark;
+          const priceDiff =
+            pos.direction === "LONG"
+              ? mark - pos.entryPrice
+              : pos.entryPrice - mark;
           const pnlPct = priceDiff / pos.entryPrice;
-          return { ...pos, unrealizedPnl: pos.collateralUsdc * pos.leverageX * pnlPct };
+          // PnL in USD = collateralUsd × leverage × % price change
+          return {
+            ...pos,
+            unrealizedPnl: pos.collateralUsd * pos.leverageX * pnlPct,
+          };
         })
       );
     },
@@ -245,12 +275,16 @@ export function usePositions() {
         ? params.entryPrice - liqDistance
         : params.entryPrice + liqDistance;
 
+    const collateralSol = params.collateralUsdc;
+    const collateralUsd = collateralSol * params.entryPrice;
+
     const id = `pos_${Math.random().toString(36).slice(2, 10)}`;
     const position: Position = {
       id,
       market: params.market,
       direction: params.direction,
-      collateralUsdc: params.collateralUsdc,
+      collateralSol,
+      collateralUsd,
       sizeTokens: params.sizeTokens,
       entryPrice: params.entryPrice,
       leverageX: params.leverageX,
@@ -274,7 +308,9 @@ export function usePositions() {
 
   async function closePositionMock(positionId: string) {
     setPositions((prev) =>
-      prev.map((p) => (p.id === positionId ? { ...p, status: "pending_close" as const } : p))
+      prev.map((p) =>
+        p.id === positionId ? { ...p, status: "pending_close" as const } : p
+      )
     );
     setComputationStatus("encrypting");
     await sleep(500);
@@ -283,7 +319,9 @@ export function usePositions() {
     setComputationStatus("awaiting_callback");
     await sleep(500);
     setPositions((prev) =>
-      prev.map((p) => (p.id === positionId ? { ...p, status: "closed" as const } : p))
+      prev.map((p) =>
+        p.id === positionId ? { ...p, status: "closed" as const } : p
+      )
     );
     setComputationStatus("done");
     setTimeout(() => setComputationStatus("idle"), 2500);
@@ -297,5 +335,7 @@ function sleep(ms: number) {
 }
 
 function randomHex(len: number) {
-  return Array.from({ length: len }, () => Math.floor(Math.random() * 16).toString(16)).join("");
+  return Array.from({ length: len }, () =>
+    Math.floor(Math.random() * 16).toString(16)
+  ).join("");
 }
