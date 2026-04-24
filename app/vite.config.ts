@@ -20,6 +20,8 @@ export default defineConfig({
   },
   optimizeDeps: {
     include: ["buffer", "@coral-xyz/anchor", "@solana/web3.js"],
+    // ADD THIS:
+    exclude: ["@arcium-hq/client"],
     esbuildOptions: {
       target: "es2020",
     },
