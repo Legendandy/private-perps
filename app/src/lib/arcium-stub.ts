@@ -1,4 +1,6 @@
-// app/src/lib/arcium-stub.ts
+// Stub for @arcium-hq/client — replaces the Node-only package in browser builds.
+// arcium.ts no longer uses RescueCipher directly — encryption is done server-side.
+
 import { PublicKey } from "@solana/web3.js";
 import { BN } from "@coral-xyz/anchor";
 
@@ -60,13 +62,14 @@ export function getCompDefAccAddress(programId: PublicKey, offset: number): Publ
 }
 
 export function getCompDefAccOffset(ixName: string): Uint8Array {
-  // sha256 of the ix name, first 4 bytes — matches arcium-anchor comp_def_offset! macro
-  const encoder = new TextEncoder();
-  const data = encoder.encode(ixName);
-  // Use Web Crypto — available in all modern browsers and Vite build env
-  return crypto.subtle.digestSync
-    ? new Uint8Array(crypto.subtle.digestSync("SHA-256", data)).slice(0, 4)
-    : new Uint8Array(4); // fallback — won't be called at build time
+  let hash = 5381;
+  for (let i = 0; i < ixName.length; i++) {
+    hash = ((hash << 5) + hash) ^ ixName.charCodeAt(i);
+    hash = hash >>> 0;
+  }
+  const buf = Buffer.alloc(4);
+  buf.writeUInt32LE(hash, 0);
+  return new Uint8Array(buf);
 }
 
 export function deserializeLE(bytes: Uint8Array): bigint {
