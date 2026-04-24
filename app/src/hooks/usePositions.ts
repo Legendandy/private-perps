@@ -23,8 +23,8 @@ import { PublicKey } from "@solana/web3.js";
 import {
   openPosition as arciumOpenPosition,
   closePosition as arciumClosePosition,
-  type ComputationStatus,
-} from "../lib/arcium";
+} from "../lib/programInstructions";
+import type { ComputationStatus } from "../lib/arcium";
 import { PROGRAM_ID, SCALE, MAINTENANCE_MARGIN_BPS } from "../lib/constants";
 import { parsePrice } from "../lib/constants";
 

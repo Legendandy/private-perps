@@ -16,7 +16,6 @@ import * as anchor from "@coral-xyz/anchor";
 import { Program, BN } from "@coral-xyz/anchor";
 import { PublicKey, SystemProgram } from "@solana/web3.js";
 import {
-  getArciumEnv,
   getMXEAccAddress,
   getMempoolAccAddress,
   getClusterAccAddress,
@@ -39,16 +38,16 @@ import type { StealthPerps } from "../idl/stealth_perps";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-const arciumEnv = getArciumEnv();
+
 
 function arciumAccounts(programId: PublicKey, computationOffset: BN) {
   return {
     mxeAccount: getMXEAccAddress(programId),
-    mempoolAccount: getMempoolAccAddress(arciumEnv.arciumClusterOffset),
-    executingPool: getExecutingPoolAccAddress(arciumEnv.arciumClusterOffset),
-    clusterAccount: getClusterAccAddress(arciumEnv.arciumClusterOffset),
+    mempoolAccount: getMempoolAccAddress(456),
+    executingPool: getExecutingPoolAccAddress(456),
+    clusterAccount: getClusterAccAddress(456),
     computationAccount: getComputationAccAddress(
-      arciumEnv.arciumClusterOffset,
+      456,
       computationOffset
     ),
   };
