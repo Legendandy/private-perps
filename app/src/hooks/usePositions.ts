@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { useWallet, useConnection } from "@solana/wallet-adapter-react";
 import * as anchor from "@coral-xyz/anchor";
 import { Program } from "@coral-xyz/anchor";
@@ -26,8 +26,8 @@ export interface Position {
   id: string;
   market: string;
   direction: "LONG" | "SHORT";
-  collateralSol: number;       // SOL amount
-  collateralUsd: number;       // USD value at entry
+  collateralSol: number;
+  collateralUsd: number;
   sizeTokens: number;
   entryPrice: number;
   leverageX: number;
@@ -46,10 +46,32 @@ export interface Position {
 export interface OpenPositionParams {
   market: string;
   direction: "LONG" | "SHORT";
-  collateralUsdc: number;   // SOL amount (field name kept for compat)
+  collateralUsdc: number;
   sizeTokens: number;
   entryPrice: number;
   leverageX: number;
+}
+
+function getStorageKey(pubkey: string) {
+  return `stealthperps_positions_${pubkey}`;
+}
+
+function savePositions(pubkey: string, positions: Position[]) {
+  try {
+    localStorage.setItem(getStorageKey(pubkey), JSON.stringify(positions));
+  } catch (e) {
+    console.error("Failed to save positions to localStorage:", e);
+  }
+}
+
+function loadPositions(pubkey: string): Position[] {
+  try {
+    const raw = localStorage.getItem(getStorageKey(pubkey));
+    if (!raw) return [];
+    return JSON.parse(raw) as Position[];
+  } catch {
+    return [];
+  }
 }
 
 export function usePositions() {
@@ -62,20 +84,12 @@ export function usePositions() {
 
   function getProvider(): anchor.AnchorProvider | null {
     if (!publicKey || !signTransaction || !signAllTransactions) return null;
-
     const anchorWallet = {
       publicKey,
-      signTransaction: async (tx: any) => {
-        const signed = await signTransaction(tx);
-        return signed;
-      },
-      signAllTransactions: async (txs: any[]) => {
-        const signed = await signAllTransactions(txs);
-        return signed;
-      },
+      signTransaction: async (tx: any) => signTransaction(tx),
+      signAllTransactions: async (txs: any[]) => signAllTransactions(txs),
       payer: null as any,
     };
-
     return new anchor.AnchorProvider(connection, anchorWallet as any, {
       commitment: "confirmed",
       skipPreflight: true,
@@ -92,6 +106,114 @@ export function usePositions() {
     return new Program(IDL, provider) as any;
   }
 
+  // ── Persist to localStorage whenever positions change ──────────────────
+  useEffect(() => {
+    if (!publicKey) return;
+    savePositions(publicKey.toBase58(), positions);
+  }, [positions, publicKey]);
+
+  // ── On wallet connect: load from localStorage then sync chain status ───
+  const fetchPositionsFromChain = useCallback(async (localPositions: Position[]) => {
+    if (!publicKey) return;
+    const provider = getProvider();
+    if (!provider) return;
+    const program = getProgram(provider);
+
+    try {
+      const onchainPositions = await program.account.position.all([
+        {
+          memcmp: {
+            offset: 8, // skip discriminator
+            bytes: publicKey.toBase58(),
+          },
+        },
+      ]);
+
+      // Build a map of PDA -> on-chain status
+      const chainStatusMap: Record<string, Position["status"]> = {};
+      for (const p of onchainPositions) {
+        const state = p.account.state;
+        const status: Position["status"] =
+          "open" in state ? "open" :
+          "closing" in state ? "pending_close" :
+          "closed" in state ? "closed" :
+          "opening" in state ? "pending_open" : "open";
+        chainStatusMap[p.publicKey.toBase58()] = status;
+      }
+
+      // Build a set of all PDAs that exist on-chain
+      const onchainPdas = new Set(onchainPositions.map((p: any) => p.publicKey.toBase58()));
+
+      if (localPositions.length > 0) {
+        // Merge: update statuses of known positions from chain
+        const merged = localPositions.map((pos) => {
+          if (!pos.positionPda) return pos;
+          const chainStatus = chainStatusMap[pos.positionPda];
+          if (chainStatus) {
+            return { ...pos, status: chainStatus };
+          }
+          // If not found on chain anymore, mark as closed
+          if (onchainPdas.size > 0 && !onchainPdas.has(pos.positionPda)) {
+            return { ...pos, status: "closed" as const };
+          }
+          return pos;
+        });
+        setPositions(merged);
+      } else if (onchainPositions.length > 0) {
+        // No local data but chain has positions — create minimal entries
+        const recovered: Position[] = onchainPositions.map((p: any) => {
+          const acc = p.account;
+          const state = acc.state;
+          const status: Position["status"] =
+            "open" in state ? "open" :
+            "closing" in state ? "pending_close" :
+            "closed" in state ? "closed" :
+            "opening" in state ? "pending_open" : "open";
+
+          return {
+            id: `pos_${acc.computationOffset.toString(16)}`,
+            market: "Unknown",
+            direction: "LONG" as const,
+            collateralSol: 0,
+            collateralUsd: 0,
+            sizeTokens: 0,
+            entryPrice: 0,
+            leverageX: 0,
+            ct_entry_price: "0x" + Buffer.from(acc.ctEntryPrice).toString("hex").slice(0, 8) + "…",
+            ct_liq_price: "0x" + Buffer.from(acc.ctLiqPrice).toString("hex").slice(0, 8) + "…",
+            liqPriceDecrypted: 0,
+            unrealizedPnl: 0,
+            fundingOwed: 0,
+            status,
+            openedAt: acc.openedAt.toNumber() * 1000,
+            computationOffset: acc.computationOffset.toString(),
+            positionPda: p.publicKey.toBase58(),
+          };
+        });
+        setPositions(recovered);
+      }
+    } catch (e) {
+      console.error("Failed to fetch positions from chain:", e);
+      // Fall back to just local data
+      if (localPositions.length > 0) {
+        setPositions(localPositions);
+      }
+    }
+  }, [publicKey, connection]);
+
+  useEffect(() => {
+    if (!publicKey) {
+      setPositions([]);
+      return;
+    }
+    const local = loadPositions(publicKey.toBase58());
+    // Set local immediately so UI isn't blank
+    if (local.length > 0) setPositions(local);
+    // Then sync with chain
+    fetchPositionsFromChain(local);
+  }, [publicKey?.toBase58()]);
+
+  // ── Open Position ──────────────────────────────────────────────────────
   const openPosition = useCallback(
     async (params: OpenPositionParams) => {
       if (MOCK_MODE) return openPositionMock(params);
@@ -110,14 +232,9 @@ export function usePositions() {
         throw e;
       }
 
-      // collateralUsdc field holds SOL amount — scale to lamports (9 decimals)
       const collateralSol = params.collateralUsdc;
       const collateralLamports = BigInt(Math.round(collateralSol * 1_000_000_000));
-
-      // size in lamports too
       const size = BigInt(Math.round(params.sizeTokens * 1_000_000_000));
-
-      // price scaled to 6 decimals (μUSD)
       const entryPrice = parsePrice(params.entryPrice.toFixed(6));
       const leverageBps = BigInt(params.leverageX * 100);
       const isLong = params.direction === "LONG";
@@ -138,13 +255,7 @@ export function usePositions() {
         const result = await arciumOpenPosition(
           program,
           provider.wallet,
-          {
-            collateralUsdc: collateralLamports,
-            size,
-            entryPrice,
-            leverageBps,
-            isLong,
-          },
+          { collateralUsdc: collateralLamports, size, entryPrice, leverageBps, isLong },
           setComputationStatus
         );
 
@@ -185,6 +296,7 @@ export function usePositions() {
     [publicKey, connection, wallet]
   );
 
+  // ── Close Position ─────────────────────────────────────────────────────
   const closePosition = useCallback(
     async (positionId: string, exitPrice: number) => {
       if (MOCK_MODE) return closePositionMock(positionId);
@@ -214,12 +326,7 @@ export function usePositions() {
         setPositions((prev) =>
           prev.map((p) =>
             p.id === positionId
-              ? {
-                  ...p,
-                  status: "closed" as const,
-                  unrealizedPnl: Number(result.pnl) / 1_000_000,
-                  txSig: result.txSig,
-                }
+              ? { ...p, status: "closed" as const, unrealizedPnl: Number(result.pnl) / 1_000_000, txSig: result.txSig }
               : p
           )
         );
@@ -237,6 +344,7 @@ export function usePositions() {
     [positions, publicKey, connection]
   );
 
+  // ── Update PnL from live prices ────────────────────────────────────────
   const updatePnl = useCallback(
     (marketPrices: Record<string, number>) => {
       setPositions((prev) =>
@@ -259,6 +367,7 @@ export function usePositions() {
     []
   );
 
+  // ── Mock helpers ───────────────────────────────────────────────────────
   async function openPositionMock(params: OpenPositionParams): Promise<Position> {
     setComputationStatus("encrypting");
     await sleep(500);
@@ -308,9 +417,7 @@ export function usePositions() {
 
   async function closePositionMock(positionId: string) {
     setPositions((prev) =>
-      prev.map((p) =>
-        p.id === positionId ? { ...p, status: "pending_close" as const } : p
-      )
+      prev.map((p) => (p.id === positionId ? { ...p, status: "pending_close" as const } : p))
     );
     setComputationStatus("encrypting");
     await sleep(500);
@@ -319,9 +426,7 @@ export function usePositions() {
     setComputationStatus("awaiting_callback");
     await sleep(500);
     setPositions((prev) =>
-      prev.map((p) =>
-        p.id === positionId ? { ...p, status: "closed" as const } : p
-      )
+      prev.map((p) => (p.id === positionId ? { ...p, status: "closed" as const } : p))
     );
     setComputationStatus("done");
     setTimeout(() => setComputationStatus("idle"), 2500);
