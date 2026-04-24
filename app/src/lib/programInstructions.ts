@@ -1,7 +1,3 @@
-/**
- * app/src/lib/programInstructions.ts
- */
-
 import * as anchor from "@coral-xyz/anchor";
 import { Program, BN } from "@coral-xyz/anchor";
 import { PublicKey, SystemProgram } from "@solana/web3.js";
@@ -25,8 +21,6 @@ import {
 } from "./arcium";
 import { parsePrice, SCALE } from "./constants";
 import type { StealthPerps } from "../idl/stealth_perps";
-
-// ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function arciumAccounts(programId: PublicKey, computationOffset: BN) {
   return {
@@ -59,8 +53,6 @@ function positionPda(
     programId
   );
 }
-
-// ─── open_position ─────────────────────────────────────────────────────────────
 
 export interface OpenPositionParams {
   collateralUsdc: bigint;
@@ -157,7 +149,7 @@ export async function openPosition(
         compDefAccount: compDef,
         systemProgram: SystemProgram.programId,
       })
-      .rpc({ skipPreflight: true, commitment: "confirmed" });
+      .rpc({ commitment: "confirmed" });
 
     console.log("=== TX SIG ===", txSig);
 
@@ -179,8 +171,6 @@ export async function openPosition(
     throw err;
   }
 }
-
-// ─── check_liquidation ──────────────────────────────────────────────────────────
 
 export interface CheckLiquidationResult {
   isLiquidatable: boolean;
@@ -246,7 +236,7 @@ export async function checkLiquidation(
         compDefAccount: compDefAddress(program.programId, "check_liquidation"),
         systemProgram: SystemProgram.programId,
       })
-      .rpc({ skipPreflight: true, commitment: "confirmed" });
+      .rpc({ commitment: "confirmed" });
 
     await waitForComputation(computationOffset, onStatus);
     const event = await eventPromise;
@@ -261,8 +251,6 @@ export async function checkLiquidation(
     throw err;
   }
 }
-
-// ─── close_position (calculate_pnl) ────────────────────────────────────────────
 
 export interface ClosePositionResult {
   pnl: bigint;
@@ -309,7 +297,7 @@ export async function closePosition(
         compDefAccount: compDefAddress(program.programId, "calculate_pnl"),
         systemProgram: SystemProgram.programId,
       })
-      .rpc({ skipPreflight: true, commitment: "confirmed" });
+      .rpc({ commitment: "confirmed" });
 
     await waitForComputation(computationOffset, onStatus);
     const event = await eventPromise;

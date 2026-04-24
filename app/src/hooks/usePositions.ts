@@ -61,8 +61,24 @@ export function usePositions() {
 
   function getProvider(): anchor.AnchorProvider | null {
     if (!publicKey || !signTransaction || !signAllTransactions) return null;
-    const anchorWallet = { publicKey, signTransaction, signAllTransactions };
-    return new anchor.AnchorProvider(connection, anchorWallet, { commitment: "confirmed" });
+
+    const anchorWallet = {
+      publicKey,
+      signTransaction: async (tx: any) => {
+        const signed = await signTransaction(tx);
+        return signed;
+      },
+      signAllTransactions: async (txs: any[]) => {
+        const signed = await signAllTransactions(txs);
+        return signed;
+      },
+      payer: null as any,
+    };
+
+    return new anchor.AnchorProvider(connection, anchorWallet as any, {
+      commitment: "confirmed",
+      skipPreflight: true,
+    });
   }
 
   function getProgram(provider: anchor.AnchorProvider) {
