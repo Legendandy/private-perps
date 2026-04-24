@@ -7,7 +7,8 @@ import { clusterApiUrl } from "@solana/web3.js";
 import App from "./App";
 import "./index.css";
 import "@solana/wallet-adapter-react-ui/styles.css";
-
+import { Buffer } from "buffer";
+window.Buffer = Buffer;
 const RPC = import.meta.env.VITE_RPC_URL ?? clusterApiUrl("devnet");
 
 function Root() {
