@@ -8,7 +8,7 @@ const {
   RescueCipher,
   deserializeLE,
 } = require("@arcium-hq/client");
-const { generateKeyPair, sharedKey } = require("@stablelib/x25519");
+const x25519lib = require("@stablelib/x25519");
 const crypto = require("crypto");
 
 const app = express();
@@ -56,7 +56,6 @@ async function getMxePubKeyCached() {
   return cachedMxePubKey;
 }
 
-// Pre-fetch on startup so first request doesn't time out
 getMxePubKeyCached().catch((err) => console.error("Failed to pre-fetch MXE key:", err));
 
 // ─── GET /api/arcium/mxe-public-key ──────────────────────────────────────────
@@ -84,9 +83,9 @@ app.post("/api/arcium/encrypt-position", async (req, res) => {
 
     const mxePubKey = await getMxePubKeyCached();
 
-    const keyPair = generateKeyPair();
+    const keyPair = x25519lib.generateKeyPair();
     const publicKey = keyPair.publicKey;
-    const secret = sharedKey(keyPair.secretKey, mxePubKey);
+    const secret = x25519lib.sharedKey(keyPair.secretKey, mxePubKey);
 
     const cipher = new RescueCipher(secret);
     const nonce = crypto.randomBytes(16);
@@ -118,9 +117,9 @@ app.post("/api/arcium/encrypt-close", async (req, res) => {
 
     const mxePubKey = await getMxePubKeyCached();
 
-    const keyPair = generateKeyPair();
+    const keyPair = x25519lib.generateKeyPair();
     const publicKey = keyPair.publicKey;
-    const secret = sharedKey(keyPair.secretKey, mxePubKey);
+    const secret = x25519lib.sharedKey(keyPair.secretKey, mxePubKey);
 
     const cipher = new RescueCipher(secret);
     const nonce = crypto.randomBytes(16);
