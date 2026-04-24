@@ -68,7 +68,11 @@ function loadPositions(pubkey: string): Position[] {
   try {
     const raw = localStorage.getItem(getStorageKey(pubkey));
     if (!raw) return [];
-    return JSON.parse(raw) as Position[];
+    const parsed = JSON.parse(raw) as Position[];
+    // Filter out any corrupted entries with no market data
+    return parsed.filter(
+      (p) => p.market && p.market !== "Unknown" && p.entryPrice > 0
+    );
   } catch {
     return [];
   }
@@ -98,119 +102,79 @@ export function usePositions() {
 
   function getProgram(provider: anchor.AnchorProvider) {
     anchor.setProvider(provider);
-    console.log("=== GET PROGRAM ===", {
-      idlAddress: IDL?.address,
-      idlInstructions: IDL?.instructions?.length,
-      providerWallet: provider?.wallet?.publicKey?.toString(),
-    });
     return new Program(IDL, provider) as any;
   }
 
   // ── Persist to localStorage whenever positions change ──────────────────
   useEffect(() => {
     if (!publicKey) return;
-    savePositions(publicKey.toBase58(), positions);
+    // Only save positions that have real data
+    const validPositions = positions.filter(
+      (p) => p.market && p.market !== "Unknown" && p.entryPrice > 0
+    );
+    savePositions(publicKey.toBase58(), validPositions);
   }, [positions, publicKey]);
 
-  // ── On wallet connect: load from localStorage then sync chain status ───
-  const fetchPositionsFromChain = useCallback(async (localPositions: Position[]) => {
-    if (!publicKey) return;
+  // ── Sync chain status for locally-known positions only ─────────────────
+  // We do NOT recover unknown positions from chain — they lack metadata.
+  const syncChainStatus = useCallback(async (localPositions: Position[]) => {
+    if (!publicKey || localPositions.length === 0) return;
     const provider = getProvider();
     if (!provider) return;
-    const program = getProgram(provider);
+
+    // Only try to sync positions that have a PDA
+    const positionsWithPda = localPositions.filter((p) => p.positionPda);
+    if (positionsWithPda.length === 0) return;
 
     try {
-      const onchainPositions = await program.account.position.all([
-        {
-          memcmp: {
-            offset: 8, // skip discriminator
-            bytes: publicKey.toBase58(),
-          },
-        },
-      ]);
+      const program = getProgram(provider);
 
-      // Build a map of PDA -> on-chain status
-      const chainStatusMap: Record<string, Position["status"]> = {};
-      for (const p of onchainPositions) {
-        const state = p.account.state;
-        const status: Position["status"] =
-          "open" in state ? "open" :
-          "closing" in state ? "pending_close" :
-          "closed" in state ? "closed" :
-          "opening" in state ? "pending_open" : "open";
-        chainStatusMap[p.publicKey.toBase58()] = status;
-      }
-
-      // Build a set of all PDAs that exist on-chain
-      const onchainPdas = new Set(onchainPositions.map((p: any) => p.publicKey.toBase58()));
-
-      if (localPositions.length > 0) {
-        // Merge: update statuses of known positions from chain
-        const merged = localPositions.map((pos) => {
-          if (!pos.positionPda) return pos;
-          const chainStatus = chainStatusMap[pos.positionPda];
-          if (chainStatus) {
-            return { ...pos, status: chainStatus };
+      // Fetch each known PDA's on-chain status
+      const updates: Record<string, Position["status"]> = {};
+      await Promise.all(
+        positionsWithPda.map(async (pos) => {
+          try {
+            const acc = await program.account.position.fetch(
+              new PublicKey(pos.positionPda!)
+            );
+            const state = acc.state;
+            const status: Position["status"] =
+              "open" in state ? "open" :
+              "closing" in state ? "pending_close" :
+              "closed" in state ? "closed" :
+              "opening" in state ? "pending_open" : "open";
+            updates[pos.id] = status;
+          } catch {
+            // Account not found — likely closed/never existed on this cluster
+            // Keep existing local status, don't mark as closed automatically
           }
-          // If not found on chain anymore, mark as closed
-          if (onchainPdas.size > 0 && !onchainPdas.has(pos.positionPda)) {
-            return { ...pos, status: "closed" as const };
-          }
-          return pos;
-        });
-        setPositions(merged);
-      } else if (onchainPositions.length > 0) {
-        // No local data but chain has positions — create minimal entries
-        const recovered: Position[] = onchainPositions.map((p: any) => {
-          const acc = p.account;
-          const state = acc.state;
-          const status: Position["status"] =
-            "open" in state ? "open" :
-            "closing" in state ? "pending_close" :
-            "closed" in state ? "closed" :
-            "opening" in state ? "pending_open" : "open";
+        })
+      );
 
-          return {
-            id: `pos_${acc.computationOffset.toString(16)}`,
-            market: "Unknown",
-            direction: "LONG" as const,
-            collateralSol: 0,
-            collateralUsd: 0,
-            sizeTokens: 0,
-            entryPrice: 0,
-            leverageX: 0,
-            ct_entry_price: "0x" + Buffer.from(acc.ctEntryPrice).toString("hex").slice(0, 8) + "…",
-            ct_liq_price: "0x" + Buffer.from(acc.ctLiqPrice).toString("hex").slice(0, 8) + "…",
-            liqPriceDecrypted: 0,
-            unrealizedPnl: 0,
-            fundingOwed: 0,
-            status,
-            openedAt: acc.openedAt.toNumber() * 1000,
-            computationOffset: acc.computationOffset.toString(),
-            positionPda: p.publicKey.toBase58(),
-          };
-        });
-        setPositions(recovered);
+      if (Object.keys(updates).length > 0) {
+        setPositions((prev) =>
+          prev.map((p) =>
+            updates[p.id] !== undefined ? { ...p, status: updates[p.id] } : p
+          )
+        );
       }
     } catch (e) {
-      console.error("Failed to fetch positions from chain:", e);
-      // Fall back to just local data
-      if (localPositions.length > 0) {
-        setPositions(localPositions);
-      }
+      console.error("Failed to sync chain status:", e);
     }
   }, [publicKey, connection]);
 
+  // ── On wallet connect: load from localStorage ──────────────────────────
   useEffect(() => {
     if (!publicKey) {
       setPositions([]);
       return;
     }
     const local = loadPositions(publicKey.toBase58());
-    // Set local immediately so UI isn't blank
-    if (local.length > 0) setPositions(local);
-    // Then sync with chain
-    fetchPositionsFromChain(local);
+    if (local.length > 0) {
+      setPositions(local);
+      // Optionally sync status in background (non-blocking)
+      syncChainStatus(local).catch(() => {});
+    }
   }, [publicKey?.toBase58()]);
 
   // ── Open Position ──────────────────────────────────────────────────────
@@ -224,9 +188,6 @@ export function usePositions() {
       let program: any;
       try {
         program = getProgram(provider);
-        console.log("=== PROGRAM CREATED ===", {
-          programId: program?.programId?.toString(),
-        });
       } catch (e) {
         console.error("=== GET PROGRAM FAILED ===", e);
         throw e;
@@ -238,16 +199,6 @@ export function usePositions() {
       const entryPrice = parsePrice(params.entryPrice.toFixed(6));
       const leverageBps = BigInt(params.leverageX * 100);
       const isLong = params.direction === "LONG";
-
-      console.log("=== PARAMS TO ARCIUM ===", {
-        collateralLamports: collateralLamports.toString(),
-        collateralSol,
-        collateralUsd: (collateralSol * params.entryPrice).toFixed(2),
-        size: size.toString(),
-        entryPrice: entryPrice.toString(),
-        leverageBps: leverageBps.toString(),
-        isLong,
-      });
 
       setComputationStatus("encrypting");
 
@@ -356,7 +307,6 @@ export function usePositions() {
               ? mark - pos.entryPrice
               : pos.entryPrice - mark;
           const pnlPct = priceDiff / pos.entryPrice;
-          // PnL in USD = collateralUsd × leverage × % price change
           return {
             ...pos,
             unrealizedPnl: pos.collateralUsd * pos.leverageX * pnlPct,
