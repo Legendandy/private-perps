@@ -8,7 +8,7 @@ const {
   RescueCipher,
   deserializeLE,
 } = require("@arcium-hq/client");
-const x25519 = require("@stablelib/x25519");
+const { generateKeyPair, sharedKey } = require("@stablelib/x25519");
 const crypto = require("crypto");
 
 const app = express();
@@ -45,6 +45,7 @@ function makeReadOnlyProvider() {
 }
 
 // ─── Cache MXE public key ─────────────────────────────────────────────────────
+
 let cachedMxePubKey = null;
 
 async function getMxePubKeyCached() {
@@ -83,11 +84,11 @@ app.post("/api/arcium/encrypt-position", async (req, res) => {
 
     const mxePubKey = await getMxePubKeyCached();
 
-    const privateKey = x25519.utils.randomSecretKey();
-    const publicKey = x25519.getPublicKey(privateKey);
-    const sharedSecret = x25519.getSharedSecret(privateKey, mxePubKey);
+    const keyPair = generateKeyPair();
+    const publicKey = keyPair.publicKey;
+    const secret = sharedKey(keyPair.secretKey, mxePubKey);
 
-    const cipher = new RescueCipher(sharedSecret);
+    const cipher = new RescueCipher(secret);
     const nonce = crypto.randomBytes(16);
     const bigintValues = values.map((v) => BigInt(v));
     const cts = cipher.encrypt(bigintValues, nonce);
@@ -117,11 +118,11 @@ app.post("/api/arcium/encrypt-close", async (req, res) => {
 
     const mxePubKey = await getMxePubKeyCached();
 
-    const privateKey = x25519.utils.randomSecretKey();
-    const publicKey = x25519.getPublicKey(privateKey);
-    const sharedSecret = x25519.getSharedSecret(privateKey, mxePubKey);
+    const keyPair = generateKeyPair();
+    const publicKey = keyPair.publicKey;
+    const secret = sharedKey(keyPair.secretKey, mxePubKey);
 
-    const cipher = new RescueCipher(sharedSecret);
+    const cipher = new RescueCipher(secret);
     const nonce = crypto.randomBytes(16);
     const bigintValues = values.map((v) => BigInt(v));
     const cts = cipher.encrypt(bigintValues, nonce);
