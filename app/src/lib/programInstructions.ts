@@ -69,6 +69,9 @@ export interface OpenPositionResult {
   txSig: string;
 }
 
+// Track in-flight close operations to prevent duplicates
+const closingPositions = new Set<string>();
+
 export async function openPosition(
   program: Program<StealthPerps>,
   wallet: anchor.web3.Keypair | anchor.AnchorProvider["wallet"],
@@ -149,7 +152,7 @@ export async function openPosition(
         compDefAccount: compDef,
         systemProgram: SystemProgram.programId,
       })
-      .rpc({ commitment: "confirmed" });
+      .rpc({ commitment: "confirmed", skipPreflight: false });
 
     console.log("=== TX SIG ===", txSig);
 
@@ -265,11 +268,26 @@ export async function closePosition(
   fundingOwed: bigint,
   onStatus?: (s: ComputationStatus) => void
 ): Promise<ClosePositionResult> {
+  const posKey = positionAddress.toBase58();
+
+  // Guard against duplicate submissions
+  if (closingPositions.has(posKey)) {
+    throw new Error("Close already in progress for this position");
+  }
+  closingPositions.add(posKey);
+
   onStatus?.("encrypting");
 
-  const encrypted = await encryptCloseInputs(exitPrice, fundingOwed);
+  let encrypted: Awaited<ReturnType<typeof encryptCloseInputs>>;
+  try {
+    encrypted = await encryptCloseInputs(exitPrice, fundingOwed);
+  } catch (err) {
+    closingPositions.delete(posKey);
+    throw err;
+  }
 
   onStatus?.("queuing");
+  // Generate a fresh offset each time — crypto.getRandomValues ensures uniqueness
   const computationOffset = randomComputationOffset();
 
   let eventResolver: (v: any) => void;
@@ -297,7 +315,14 @@ export async function closePosition(
         compDefAccount: compDefAddress(program.programId, "calculate_pnl"),
         systemProgram: SystemProgram.programId,
       })
-      .rpc({ commitment: "confirmed" });
+      .rpc({
+        commitment: "confirmed",
+        // Skip preflight so a "already processed" simulation error doesn't
+        // block a tx that may have actually landed on a previous attempt
+        skipPreflight: true,
+      });
+
+    console.log("=== CLOSE TX SIG ===", txSig);
 
     await waitForComputation(computationOffset, onStatus);
     const event = await eventPromise;
@@ -309,5 +334,7 @@ export async function closePosition(
     if (err?.logs) console.error("=== CLOSE POS LOGS ===\n" + err.logs.join("\n"));
     program.removeEventListener(listener);
     throw err;
+  } finally {
+    closingPositions.delete(posKey);
   }
 }
