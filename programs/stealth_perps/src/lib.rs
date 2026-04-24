@@ -13,8 +13,6 @@ use arcium_anchor::{
     ArgBuilder, SignedComputationOutputs,
 };
 
-
-// Provided for arcium-macros callback_accounts which uses ErrorCode::ClusterNotSet
 #[derive(Debug, Clone, Copy)]
 pub enum ErrorCode {
     ClusterNotSet,
@@ -24,6 +22,7 @@ impl From<ErrorCode> for anchor_lang::error::Error {
         anchor_lang::error::Error::from(anchor_lang::error::ErrorCode::AccountNotInitialized)
     }
 }
+
 declare_id!("57dAxRF57a33kHwa51Xhd4eNjLg7vc7Q1phfMKS4xtfy");
 
 const COMP_DEF_OFFSET_OPEN_POSITION: u32     = comp_def_offset("open_position");
@@ -37,52 +36,53 @@ pub mod stealth_perps {
 
     pub fn init_open_position_comp_def(ctx: Context<InitOpenPositionCompDef>) -> Result<()> {
         init_comp_def(
-        ctx.accounts,
-        Some(CircuitSource::OffChain(OffChainCircuitSource {
-            source: "https://snkekjxagpohoxwnqplm.supabase.co/storage/v1/object/public/arcium-circuits/open_position.arcis".to_string(),
-            hash: circuit_hash!("open_position"),
-        })),
-        None,
-    )?;
+            ctx.accounts,
+            Some(CircuitSource::OffChain(OffChainCircuitSource {
+                source: "https://snkekjxagpohoxwnqplm.supabase.co/storage/v1/object/public/arcium-circuits/open_position.arcis".to_string(),
+                hash: circuit_hash!("open_position"),
+            })),
+            None,
+        )?;
         Ok(())
     }
 
     pub fn init_check_liquidation_comp_def(ctx: Context<InitCheckLiquidationCompDef>) -> Result<()> {
         init_comp_def(
-        ctx.accounts,
-        Some(CircuitSource::OffChain(OffChainCircuitSource {
-            source: "https://snkekjxagpohoxwnqplm.supabase.co/storage/v1/object/public/arcium-circuits/check_liquidation.arcis".to_string(),
-            hash: circuit_hash!("check_liquidation"),
-        })),
-        None,
-    )?;
+            ctx.accounts,
+            Some(CircuitSource::OffChain(OffChainCircuitSource {
+                source: "https://snkekjxagpohoxwnqplm.supabase.co/storage/v1/object/public/arcium-circuits/check_liquidation.arcis".to_string(),
+                hash: circuit_hash!("check_liquidation"),
+            })),
+            None,
+        )?;
         Ok(())
     }
 
     pub fn init_calculate_pnl_comp_def(ctx: Context<InitCalculatePnlCompDef>) -> Result<()> {
         init_comp_def(
-        ctx.accounts,
-        Some(CircuitSource::OffChain(OffChainCircuitSource {
-            source: "https://snkekjxagpohoxwnqplm.supabase.co/storage/v1/object/public/arcium-circuits/calculate_pnl.arcis".to_string(),
-            hash: circuit_hash!("calculate_pnl"),
-        })),
-        None,
-    )?;
+            ctx.accounts,
+            Some(CircuitSource::OffChain(OffChainCircuitSource {
+                source: "https://snkekjxagpohoxwnqplm.supabase.co/storage/v1/object/public/arcium-circuits/calculate_pnl.arcis".to_string(),
+                hash: circuit_hash!("calculate_pnl"),
+            })),
+            None,
+        )?;
         Ok(())
     }
 
     pub fn init_apply_funding_comp_def(ctx: Context<InitApplyFundingCompDef>) -> Result<()> {
         init_comp_def(
-        ctx.accounts,
-        Some(CircuitSource::OffChain(OffChainCircuitSource {
-            source: "https://snkekjxagpohoxwnqplm.supabase.co/storage/v1/object/public/arcium-circuits/apply_funding.arcis".to_string(),
-            hash: circuit_hash!("apply_funding"),
-        })),
-        None,
-    )?;
+            ctx.accounts,
+            Some(CircuitSource::OffChain(OffChainCircuitSource {
+                source: "https://snkekjxagpohoxwnqplm.supabase.co/storage/v1/object/public/arcium-circuits/apply_funding.arcis".to_string(),
+                hash: circuit_hash!("apply_funding"),
+            })),
+            None,
+        )?;
         Ok(())
     }
 
+    #[inline(never)]
     pub fn open_position(
         ctx: Context<OpenPosition>,
         computation_offset: u64,
@@ -169,6 +169,7 @@ pub mod stealth_perps {
         Ok(())
     }
 
+    #[inline(never)]
     pub fn check_liquidation(
         ctx: Context<CheckLiquidation>,
         computation_offset: u64,
@@ -238,6 +239,7 @@ pub mod stealth_perps {
         Ok(())
     }
 
+    #[inline(never)]
     pub fn close_position(
         ctx: Context<ClosePosition>,
         computation_offset: u64,
@@ -440,7 +442,7 @@ pub struct OpenPosition<'info> {
     )]
     pub position: Account<'info, Position>,
     #[account(address = derive_mxe_pda!())]
-    pub mxe_account: Account<'info, MXEAccount>,
+    pub mxe_account: Box<Account<'info, MXEAccount>>,
     #[account(mut, address = derive_mempool_pda!(mxe_account, StealthPerpsError::ClusterNotSet))]
     /// CHECK: checked by arcium
     pub mempool_account: UncheckedAccount<'info>,
@@ -451,9 +453,9 @@ pub struct OpenPosition<'info> {
     /// CHECK: checked by arcium
     pub computation_account: UncheckedAccount<'info>,
     #[account(address = derive_comp_def_pda!(COMP_DEF_OFFSET_OPEN_POSITION))]
-    pub comp_def_account: Account<'info, ComputationDefinitionAccount>,
+    pub comp_def_account: Box<Account<'info, ComputationDefinitionAccount>>,
     #[account(mut, address = derive_cluster_pda!(mxe_account, StealthPerpsError::ClusterNotSet))]
-    pub cluster_account: Account<'info, Cluster>,
+    pub cluster_account: Box<Account<'info, Cluster>>,
     #[account(mut, address = ARCIUM_FEE_POOL_ACCOUNT_ADDRESS)]
     pub pool_account: Account<'info, FeePool>,
     #[account(mut, address = ARCIUM_CLOCK_ACCOUNT_ADDRESS)]
@@ -467,13 +469,13 @@ pub struct OpenPosition<'info> {
 pub struct OpenPositionCallback<'info> {
     pub arcium_program: Program<'info, Arcium>,
     #[account(address = derive_comp_def_pda!(COMP_DEF_OFFSET_OPEN_POSITION))]
-    pub comp_def_account: Account<'info, ComputationDefinitionAccount>,
+    pub comp_def_account: Box<Account<'info, ComputationDefinitionAccount>>,
     #[account(address = derive_mxe_pda!())]
-    pub mxe_account: Account<'info, MXEAccount>,
+    pub mxe_account: Box<Account<'info, MXEAccount>>,
     /// CHECK: checked by arcium
     pub computation_account: UncheckedAccount<'info>,
     #[account(address = derive_cluster_pda!(mxe_account, StealthPerpsError::ClusterNotSet))]
-    pub cluster_account: Account<'info, Cluster>,
+    pub cluster_account: Box<Account<'info, Cluster>>,
     #[account(address = ::anchor_lang::solana_program::sysvar::instructions::ID)]
     /// CHECK: instructions sysvar
     pub instructions_sysvar: AccountInfo<'info>,
@@ -502,7 +504,7 @@ pub struct CheckLiquidation<'info> {
     )]
     pub liq_check: Account<'info, LiqCheck>,
     #[account(address = derive_mxe_pda!())]
-    pub mxe_account: Account<'info, MXEAccount>,
+    pub mxe_account: Box<Account<'info, MXEAccount>>,
     #[account(mut, address = derive_mempool_pda!(mxe_account, StealthPerpsError::ClusterNotSet))]
     /// CHECK: checked by arcium
     pub mempool_account: UncheckedAccount<'info>,
@@ -513,9 +515,9 @@ pub struct CheckLiquidation<'info> {
     /// CHECK: checked by arcium
     pub computation_account: UncheckedAccount<'info>,
     #[account(address = derive_comp_def_pda!(COMP_DEF_OFFSET_CHECK_LIQUIDATION))]
-    pub comp_def_account: Account<'info, ComputationDefinitionAccount>,
+    pub comp_def_account: Box<Account<'info, ComputationDefinitionAccount>>,
     #[account(mut, address = derive_cluster_pda!(mxe_account, StealthPerpsError::ClusterNotSet))]
-    pub cluster_account: Account<'info, Cluster>,
+    pub cluster_account: Box<Account<'info, Cluster>>,
     #[account(mut, address = ARCIUM_FEE_POOL_ACCOUNT_ADDRESS)]
     pub pool_account: Account<'info, FeePool>,
     #[account(mut, address = ARCIUM_CLOCK_ACCOUNT_ADDRESS)]
@@ -529,13 +531,13 @@ pub struct CheckLiquidation<'info> {
 pub struct CheckLiquidationCallback<'info> {
     pub arcium_program: Program<'info, Arcium>,
     #[account(address = derive_comp_def_pda!(COMP_DEF_OFFSET_CHECK_LIQUIDATION))]
-    pub comp_def_account: Account<'info, ComputationDefinitionAccount>,
+    pub comp_def_account: Box<Account<'info, ComputationDefinitionAccount>>,
     #[account(address = derive_mxe_pda!())]
-    pub mxe_account: Account<'info, MXEAccount>,
+    pub mxe_account: Box<Account<'info, MXEAccount>>,
     /// CHECK: checked by arcium
     pub computation_account: UncheckedAccount<'info>,
     #[account(address = derive_cluster_pda!(mxe_account, StealthPerpsError::ClusterNotSet))]
-    pub cluster_account: Account<'info, Cluster>,
+    pub cluster_account: Box<Account<'info, Cluster>>,
     #[account(address = ::anchor_lang::solana_program::sysvar::instructions::ID)]
     /// CHECK: instructions sysvar
     pub instructions_sysvar: AccountInfo<'info>,
@@ -560,7 +562,7 @@ pub struct ClosePosition<'info> {
     #[account(mut, constraint = position.owner == trader.key() @ StealthPerpsError::Unauthorized)]
     pub position: Account<'info, Position>,
     #[account(address = derive_mxe_pda!())]
-    pub mxe_account: Account<'info, MXEAccount>,
+    pub mxe_account: Box<Account<'info, MXEAccount>>,
     #[account(mut, address = derive_mempool_pda!(mxe_account, StealthPerpsError::ClusterNotSet))]
     /// CHECK: checked by arcium
     pub mempool_account: UncheckedAccount<'info>,
@@ -571,9 +573,9 @@ pub struct ClosePosition<'info> {
     /// CHECK: checked by arcium
     pub computation_account: UncheckedAccount<'info>,
     #[account(address = derive_comp_def_pda!(COMP_DEF_OFFSET_CALCULATE_PNL))]
-    pub comp_def_account: Account<'info, ComputationDefinitionAccount>,
+    pub comp_def_account: Box<Account<'info, ComputationDefinitionAccount>>,
     #[account(mut, address = derive_cluster_pda!(mxe_account, StealthPerpsError::ClusterNotSet))]
-    pub cluster_account: Account<'info, Cluster>,
+    pub cluster_account: Box<Account<'info, Cluster>>,
     #[account(mut, address = ARCIUM_FEE_POOL_ACCOUNT_ADDRESS)]
     pub pool_account: Account<'info, FeePool>,
     #[account(mut, address = ARCIUM_CLOCK_ACCOUNT_ADDRESS)]
@@ -587,13 +589,13 @@ pub struct ClosePosition<'info> {
 pub struct CalculatePnlCallback<'info> {
     pub arcium_program: Program<'info, Arcium>,
     #[account(address = derive_comp_def_pda!(COMP_DEF_OFFSET_CALCULATE_PNL))]
-    pub comp_def_account: Account<'info, ComputationDefinitionAccount>,
+    pub comp_def_account: Box<Account<'info, ComputationDefinitionAccount>>,
     #[account(address = derive_mxe_pda!())]
-    pub mxe_account: Account<'info, MXEAccount>,
+    pub mxe_account: Box<Account<'info, MXEAccount>>,
     /// CHECK: checked by arcium
     pub computation_account: UncheckedAccount<'info>,
     #[account(address = derive_cluster_pda!(mxe_account, StealthPerpsError::ClusterNotSet))]
-    pub cluster_account: Account<'info, Cluster>,
+    pub cluster_account: Box<Account<'info, Cluster>>,
     #[account(address = ::anchor_lang::solana_program::sysvar::instructions::ID)]
     /// CHECK: instructions sysvar
     pub instructions_sysvar: AccountInfo<'info>,
