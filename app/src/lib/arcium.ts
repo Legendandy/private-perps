@@ -17,7 +17,17 @@
 
 import * as anchor from "@coral-xyz/anchor";
 import { Connection, PublicKey, Transaction } from "@solana/web3.js";
-import { RescueCipher, deserializeLE } from "@arcium-hq/client";
+import { RescueCipher, deserializeLE } from "./arcium-stub";
+import {
+  getMXEAccAddress,
+  getMempoolAccAddress,
+  getClusterAccAddress,
+  getExecutingPoolAccAddress,
+  getComputationAccAddress,
+  getCompDefAccAddress,
+  getCompDefAccOffset,
+  awaitComputationFinalization,
+} from "@arcium-hq/client";
 import * as x25519 from "@stablelib/x25519";
 import { BACKEND_API_BASE, PROGRAM_ID, RPC_URL } from "./constants";
 
