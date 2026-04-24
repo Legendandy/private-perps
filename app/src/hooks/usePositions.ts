@@ -1,7 +1,3 @@
-/**
- * usePositions.ts
- */
-
 import { useState, useCallback } from "react";
 import { useWallet, useConnection } from "@solana/wallet-adapter-react";
 import * as anchor from "@coral-xyz/anchor";
@@ -12,15 +8,17 @@ import {
   closePosition as arciumClosePosition,
 } from "../lib/programInstructions";
 import type { ComputationStatus } from "../lib/arcium";
-import { PROGRAM_ID, SCALE, MAINTENANCE_MARGIN_BPS } from "../lib/constants";
+import { PROGRAM_ID } from "../lib/constants";
 import { parsePrice } from "../lib/constants";
 
-let IDL: any;
-try {
-  IDL = require("../idl/stealth_perps.json");
-} catch {
-  IDL = { version: "0.1.0", name: "stealth_perps", instructions: [], accounts: [], events: [] };
-}
+import IDL_JSON from "../idl/stealth_perps.json";
+const IDL = IDL_JSON as any;
+
+console.log("=== IDL LOADED ===", {
+  address: IDL?.address,
+  instructions: IDL?.instructions?.length,
+  name: IDL?.metadata?.name ?? IDL?.name,
+});
 
 const MOCK_MODE = import.meta.env.VITE_MOCK_ARCIUM === "true";
 
@@ -68,27 +66,32 @@ export function usePositions() {
   }
 
   function getProgram(provider: anchor.AnchorProvider) {
-  anchor.setProvider(provider);
-  return new Program(IDL, provider);
-}
+    anchor.setProvider(provider);
+    console.log("=== GET PROGRAM ===", {
+      idlAddress: IDL?.address,
+      idlInstructions: IDL?.instructions?.length,
+      providerWallet: provider?.wallet?.publicKey?.toString(),
+    });
+    return new Program(IDL, provider) as any;
+  }
 
   const openPosition = useCallback(
     async (params: OpenPositionParams) => {
-      if (MOCK_MODE) {
-        return openPositionMock(params);
-      }
+      if (MOCK_MODE) return openPositionMock(params);
 
       const provider = getProvider();
       if (!provider) throw new Error("Wallet not connected");
-      const program = getProgram(provider);
 
-      // ── DEBUG ──────────────────────────────────────────────────────────────
-      console.log("=== PROGRAM DEBUG ===", {
-        programId: program.programId?.toString(),
-        idlInstructions: IDL?.instructions?.length,
-        idlAddress: IDL?.address,
-        providerWallet: provider.wallet?.publicKey?.toString(),
-      });
+      let program: any;
+      try {
+        program = getProgram(provider);
+        console.log("=== PROGRAM CREATED ===", {
+          programId: program?.programId?.toString(),
+        });
+      } catch (e) {
+        console.error("=== GET PROGRAM FAILED ===", e);
+        throw e;
+      }
 
       const collateralUsdc = BigInt(Math.round(params.collateralUsdc * 1_000_000));
       const size = BigInt(Math.round(params.sizeTokens * 1_000_000));
@@ -103,21 +106,14 @@ export function usePositions() {
         leverageBps: leverageBps.toString(),
         isLong,
       });
-      // ── END DEBUG ──────────────────────────────────────────────────────────
 
       setComputationStatus("encrypting");
 
       try {
         const result = await arciumOpenPosition(
-          program as any,
+          program,
           provider.wallet,
-          {
-            collateralUsdc,
-            size,
-            entryPrice,
-            leverageBps,
-            isLong,
-          },
+          { collateralUsdc, size, entryPrice, leverageBps, isLong },
           setComputationStatus
         );
 
@@ -173,7 +169,7 @@ export function usePositions() {
 
       try {
         const result = await arciumClosePosition(
-          program as any,
+          program,
           provider.wallet,
           new PublicKey(pos.positionPda),
           parsePrice(exitPrice.toFixed(6)),
