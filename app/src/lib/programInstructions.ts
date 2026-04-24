@@ -138,34 +138,46 @@ export async function openPosition(
     }
   });
 
-  const txSig = await program.methods
-    .openPosition(
-      computationOffset,
-      encrypted.ct_collateral,
-      encrypted.ct_size,
-      encrypted.ct_entry_price,
-      encrypted.ct_leverage_bps,
-      encrypted.ct_is_long,
-      encrypted.pub_key,
-      encrypted.nonce
-    )
-    .accountsPartial({
-      trader: wallet.publicKey,
-      position,
-      ...accounts,
-      compDefAccount: compDef,
-      systemProgram: SystemProgram.programId,
-    })
-    .rpc({ skipPreflight: true, commitment: "confirmed" });
+  try {
+    const txSig = await program.methods
+      .openPosition(
+        computationOffset,
+        encrypted.ct_collateral,
+        encrypted.ct_size,
+        encrypted.ct_entry_price,
+        encrypted.ct_leverage_bps,
+        encrypted.ct_is_long,
+        encrypted.pub_key,
+        encrypted.nonce
+      )
+      .accountsPartial({
+        trader: wallet.publicKey,
+        position,
+        ...accounts,
+        compDefAccount: compDef,
+        systemProgram: SystemProgram.programId,
+      })
+      .rpc({ skipPreflight: true, commitment: "confirmed" });
 
-  onStatus?.("mpc_computing");
-  await waitForComputation(computationOffset, onStatus);
-  onStatus?.("awaiting_callback");
-  const event = await eventPromise;
-  const liqPriceDecrypted = await decryptResult(event.liqPriceCt, event.nonce);
-  onStatus?.("done");
+    console.log("=== TX SIG ===", txSig);
 
-  return { positionPda: position, computationOffset, liqPriceDecrypted, txSig };
+    onStatus?.("mpc_computing");
+    await waitForComputation(computationOffset, onStatus);
+    onStatus?.("awaiting_callback");
+    const event = await eventPromise;
+    const liqPriceDecrypted = await decryptResult(event.liqPriceCt, event.nonce);
+    onStatus?.("done");
+
+    return { positionPda: position, computationOffset, liqPriceDecrypted, txSig };
+  } catch (err: any) {
+    console.error("=== TX ERROR ===", err);
+    console.error("=== TX ERROR JSON ===", JSON.stringify(err, null, 2));
+    if (err?.logs) {
+      console.error("=== TX LOGS ===\n" + err.logs.join("\n"));
+    }
+    program.removeEventListener(listener);
+    throw err;
+  }
 }
 
 // ─── check_liquidation ──────────────────────────────────────────────────────────
@@ -217,31 +229,37 @@ export async function checkLiquidation(
     }
   });
 
-  const txSig = await program.methods
-    .checkLiquidation(
-      computationOffset,
-      ct_mark_price,
-      maintenanceMarginBps,
-      Array.from(publicKey),
-      noncebn
-    )
-    .accountsPartial({
-      keeper: wallet.publicKey,
-      position: positionAddress,
-      liqCheck: liqCheckPda,
-      ...arciumAccounts(program.programId, computationOffset),
-      compDefAccount: compDefAddress(program.programId, "check_liquidation"),
-      systemProgram: SystemProgram.programId,
-    })
-    .rpc({ skipPreflight: true, commitment: "confirmed" });
+  try {
+    const txSig = await program.methods
+      .checkLiquidation(
+        computationOffset,
+        ct_mark_price,
+        maintenanceMarginBps,
+        Array.from(publicKey),
+        noncebn
+      )
+      .accountsPartial({
+        keeper: wallet.publicKey,
+        position: positionAddress,
+        liqCheck: liqCheckPda,
+        ...arciumAccounts(program.programId, computationOffset),
+        compDefAccount: compDefAddress(program.programId, "check_liquidation"),
+        systemProgram: SystemProgram.programId,
+      })
+      .rpc({ skipPreflight: true, commitment: "confirmed" });
 
-  await waitForComputation(computationOffset, onStatus);
-  const event = await eventPromise;
-  const result = await decryptResult(event.resultCt, event.nonce);
-  const isLiquidatable = result === 1n;
-
-  onStatus?.("done");
-  return { isLiquidatable, txSig };
+    await waitForComputation(computationOffset, onStatus);
+    const event = await eventPromise;
+    const result = await decryptResult(event.resultCt, event.nonce);
+    const isLiquidatable = result === 1n;
+    onStatus?.("done");
+    return { isLiquidatable, txSig };
+  } catch (err: any) {
+    console.error("=== CHECK LIQ TX ERROR ===", JSON.stringify(err, null, 2));
+    if (err?.logs) console.error("=== CHECK LIQ LOGS ===\n" + err.logs.join("\n"));
+    program.removeEventListener(listener);
+    throw err;
+  }
 }
 
 // ─── close_position (calculate_pnl) ────────────────────────────────────────────
@@ -275,27 +293,33 @@ export async function closePosition(
     }
   });
 
-  const txSig = await program.methods
-    .closePosition(
-      computationOffset,
-      encrypted.ct_exit_price,
-      encrypted.ct_funding_owed,
-      encrypted.pub_key,
-      encrypted.nonce
-    )
-    .accountsPartial({
-      trader: wallet.publicKey,
-      position: positionAddress,
-      ...arciumAccounts(program.programId, computationOffset),
-      compDefAccount: compDefAddress(program.programId, "calculate_pnl"),
-      systemProgram: SystemProgram.programId,
-    })
-    .rpc({ skipPreflight: true, commitment: "confirmed" });
+  try {
+    const txSig = await program.methods
+      .closePosition(
+        computationOffset,
+        encrypted.ct_exit_price,
+        encrypted.ct_funding_owed,
+        encrypted.pub_key,
+        encrypted.nonce
+      )
+      .accountsPartial({
+        trader: wallet.publicKey,
+        position: positionAddress,
+        ...arciumAccounts(program.programId, computationOffset),
+        compDefAccount: compDefAddress(program.programId, "calculate_pnl"),
+        systemProgram: SystemProgram.programId,
+      })
+      .rpc({ skipPreflight: true, commitment: "confirmed" });
 
-  await waitForComputation(computationOffset, onStatus);
-  const event = await eventPromise;
-  const pnl = await decryptResult(event.pnlCt, event.pnlNonce);
-
-  onStatus?.("done");
-  return { pnl, txSig };
+    await waitForComputation(computationOffset, onStatus);
+    const event = await eventPromise;
+    const pnl = await decryptResult(event.pnlCt, event.pnlNonce);
+    onStatus?.("done");
+    return { pnl, txSig };
+  } catch (err: any) {
+    console.error("=== CLOSE POS TX ERROR ===", JSON.stringify(err, null, 2));
+    if (err?.logs) console.error("=== CLOSE POS LOGS ===\n" + err.logs.join("\n"));
+    program.removeEventListener(listener);
+    throw err;
+  }
 }
